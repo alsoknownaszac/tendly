@@ -30,7 +30,7 @@ export default function ProfileScreen() {
   const account = useAbstraxionAccount();
   const { client: signingClient } = useAbstraxionSigningClient();
   const [isConnecting, setIsConnecting] = useState(false);
-  
+  const isConnected = !!account;
 
   const [stats] = useState({
     level: 8,
@@ -362,6 +362,7 @@ export default function ProfileScreen() {
               <Text style={styles.blockchainDescription}>
                 {account
                   ? 'Your achievements are secured on-chain with zkTLS verification'
+                  : 'Connect your wallet to enable blockchain verification'}
                 {account && ' • ⛓️ Synced'}
               </Text>
               {account && (
@@ -369,6 +370,10 @@ export default function ProfileScreen() {
                   <Text style={styles.blockchainButtonText}>
                     View Verified Achievements
                   </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+            <View style={styles.statCard}>
               <Text style={styles.statNumber}>{account ? '⛓️' : '📱'}</Text>
               <Text style={styles.statLabel}>{account ? 'On-Chain' : 'Local'}</Text>
             </View>
