@@ -24,25 +24,21 @@ import {
 import {
   useAbstraxionAccount,
   useAbstraxionSigningClient,
-  useAbstraxionClient,
 } from '@burnt-labs/abstraxion-react-native';
 
 export default function ProfileScreen() {
-  const { 
-    data: account, 
-    isConnected, 
-    isConnecting 
+  const {
+    data: account,
+    logout,
+    login,
+    isConnected,
+    isConnecting,
   } = useAbstraxionAccount();
-  
-  const { 
-    client: signingClient
-  } = useAbstraxionSigningClient();
-  
-  const { 
-    client: queryClient 
-  } = useAbstraxionClient();
+  const { client, signArb } = useAbstraxionSigningClient();
 
-  const [isConnectingState, setIsConnectingState] = useState(false);
+  const [signArbResponse, setSignArbResponse] = useState("");
+  const [txHash, setTxHash] = useState("");
+  const [loadingTransaction, setLoadingTransaction] = useState(false);
 
   const [stats] = useState({
     level: 8,
@@ -54,48 +50,92 @@ export default function ProfileScreen() {
     rareSeeds: 3,
   });
 
-  const handleLogin = async () => {
+  async function handleSampleTransaction() {
+    setLoadingTransaction(true);
     try {
-      setIsConnectingState(true);
-      await signingClient?.signIn();
+      const msg = {
+        type_urls: ["/cosmwasm.wasm.v1.MsgInstantiateContract"],
+        grant_configs: [
+          {
+            description: "Ability to instantiate contracts for Tendly",
+            optional: false,
+            authorization: {
+              type_url: "/cosmos.authz.v1beta1.GenericAuthorization",
+              value: "CigvY29zbXdhc20ud2FzbS52MS5Nc2dJbnN0YW50aWF0ZUNvbnRyYWN0",
+            },
+          },
+        ],
+        fee_config: {
+          description: "Tendly transaction fee config",
+          allowance: {
+            type_url: "/cosmos.feegrant.v1beta1.BasicAllowance",
+            value: "Cg8KBXV4aW9uEgY1MDAwMDA=",
+          },
+        },
+        admin: account?.bech32Address,
+      };
+
+      const transactionRes = await client?.instantiate(
+        account?.bech32Address || '',
+        33,
+        msg,
+        "Tendly garden transaction",
+        "auto"
+      );
+
+      if (!transactionRes) {
+        throw new Error("Transaction failed.");
+      }
+
+      setTxHash(transactionRes.transactionHash);
+      Alert.alert('Success', 'Transaction completed successfully! 🌱');
     } catch (error) {
-      console.error('Login error:', error);
-      Alert.alert('Connection Error', 'Failed to connect wallet');
+      Alert.alert("Error", (error as Error).message);
     } finally {
-      setIsConnectingState(false);
+      setLoadingTransaction(false);
     }
-  };
+  }
 
-  const handleLogout = async () => {
-    try {
-      await signingClient?.signOut();
-      Alert.alert('Success', 'Wallet disconnected successfully');
-    } catch (error) {
-      console.error('Logout error:', error);
-      Alert.alert('Logout Error', 'Failed to disconnect wallet');
+  async function handleSign(): Promise<void> {
+    if (client?.granteeAddress) {
+      const response = await signArb?.(
+        client.granteeAddress,
+        "Tendly garden verification"
+      );
+      if (response) {
+        setSignArbResponse(response);
+        Alert.alert('Success', 'Message signed successfully! ✅');
+      }
     }
-  };
+  }
 
-  // View blockchain transactions
+  function handleLogout() {
+    logout();
+    setSignArbResponse("");
+    setTxHash("");
+    Alert.alert('Success', 'Wallet disconnected successfully');
+  }
+
   const viewOnExplorer = () => {
-    if (account?.bech32Address) {
-      const explorerUrl = `https://explorer.burnt.com/xion-testnet-1/account/${account.bech32Address}`;
+    if (txHash) {
       Alert.alert(
-        'View on Explorer',
-        `Address: ${account.bech32Address}`,
+        'Transaction Hash',
+        txHash,
         [
-          { text: 'Cancel', style: 'cancel' },
-          { 
-            text: 'Open Explorer', 
-            onPress: () => {
-              // In a real app, you'd open the URL
-              console.log('Opening explorer:', explorerUrl);
-            }
-          }
+          { text: 'OK', style: 'default' }
+        ]
+      );
+    } else if (account?.bech32Address) {
+      Alert.alert(
+        'Wallet Address',
+        account.bech32Address,
+        [
+          { text: 'OK', style: 'default' }
         ]
       );
     }
   };
+
   const [achievements] = useState([
     {
       id: '1',
@@ -192,14 +232,14 @@ export default function ProfileScreen() {
                 <TouchableOpacity
                   style={[
                     styles.walletButton,
-                    (isConnecting || isConnectingState) && styles.walletButtonDisabled,
+                    isConnecting && styles.walletButtonDisabled,
                   ]}
-                  onPress={handleLogin}
-                  disabled={isConnecting || isConnectingState}
+                  onPress={login}
+                  disabled={isConnecting}
                 >
                   <LogIn size={20} color="#F5F1E8" />
                   <Text style={styles.walletButtonText}>
-                    {(isConnecting || isConnectingState) ? 'Connecting...' : 'Connect Wallet'}
+                    {isConnecting ? 'Connecting...' : 'Connect Wallet'}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -222,9 +262,9 @@ export default function ProfileScreen() {
                 </View>
                 <View style={styles.walletActions}>
                   <TouchableOpacity style={styles.explorerButton}>
-                    <Text style={styles.explorerButtonText}>
                     onPress={viewOnExplorer}
-                      View on Explorer
+                    <Text style={styles.explorerButtonText}>
+                      {txHash ? 'View Transaction' : 'View Address'}
                     </Text>
                   </TouchableOpacity>
                   <TouchableOpacity
@@ -235,6 +275,49 @@ export default function ProfileScreen() {
                     <Text style={styles.logoutButtonText}>Disconnect</Text>
                   </TouchableOpacity>
                 </View>
+                
+                {/* Blockchain Actions */}
+                <View style={styles.blockchainActions}>
+                  <TouchableOpacity
+                    style={[styles.actionButton, loadingTransaction && styles.actionButtonDisabled]}
+                    onPress={handleSampleTransaction}
+                    disabled={loadingTransaction}
+                  >
+                    <Text style={styles.actionButtonText}>
+                      {loadingTransaction ? 'Processing...' : 'Sample Transaction'}
+                    </Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity
+                    style={styles.actionButton}
+                    onPress={handleSign}
+                  >
+                    <Text style={styles.actionButtonText}>Sign Message</Text>
+                  </TouchableOpacity>
+                </View>
+                
+                {/* Response Display */}
+                {(signArbResponse || txHash) && (
+                  <View style={styles.responseCard}>
+                    <Text style={styles.responseTitle}>Blockchain Response</Text>
+                    {signArbResponse && (
+                      <View style={styles.responseItem}>
+                        <Text style={styles.responseLabel}>Signature:</Text>
+                        <Text style={styles.responseText} numberOfLines={3}>
+                          {signArbResponse}
+                        </Text>
+                      </View>
+                    )}
+                    {txHash && (
+                      <View style={styles.responseItem}>
+                        <Text style={styles.responseLabel}>Transaction Hash:</Text>
+                        <Text style={styles.responseText} numberOfLines={2}>
+                          {txHash}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                )}
               </View>
             )}
           </View>
@@ -565,6 +648,56 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#D97757',
+  },
+  blockchainActions: {
+    gap: 12,
+    marginTop: 16,
+  },
+  actionButton: {
+    backgroundColor: '#87A96B',
+    borderRadius: 12,
+    padding: 12,
+    alignItems: 'center',
+  },
+  actionButtonDisabled: {
+    backgroundColor: '#C4B59A',
+    opacity: 0.7,
+  },
+  actionButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#F5F1E8',
+  },
+  responseCard: {
+    backgroundColor: 'rgba(135, 169, 107, 0.05)',
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(135, 169, 107, 0.2)',
+  },
+  responseTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#2C5F41',
+    marginBottom: 12,
+  },
+  responseItem: {
+    marginBottom: 8,
+  },
+  responseLabel: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#8B7355',
+    marginBottom: 4,
+  },
+  responseText: {
+    fontSize: 12,
+    color: '#2C5F41',
+    fontFamily: 'monospace',
+    backgroundColor: 'rgba(255, 255, 255, 0.6)',
+    padding: 8,
+    borderRadius: 6,
   },
   statsGrid: {
     flexDirection: 'row',
