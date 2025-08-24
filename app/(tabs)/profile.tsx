@@ -35,13 +35,14 @@ export default function ProfileScreen() {
   } = useAbstraxionAccount();
   
   const { 
-    client: signingClient, 
-    logout 
+    client: signingClient
   } = useAbstraxionSigningClient();
   
   const { 
     client: queryClient 
   } = useAbstraxionClient();
+
+  const [isConnectingState, setIsConnectingState] = useState(false);
 
   const [stats] = useState({
     level: 8,
@@ -53,25 +54,25 @@ export default function ProfileScreen() {
     rareSeeds: 3,
   });
 
-  // Handle wallet connection
-  const handleConnect = async () => {
+  const handleLogin = async () => {
     try {
-      // Connection is handled automatically by the provider
-      console.log('Connecting wallet...');
+      setIsConnectingState(true);
+      await signingClient?.signIn();
     } catch (error) {
-      console.error('Failed to connect wallet:', error);
+      console.error('Login error:', error);
       Alert.alert('Connection Error', 'Failed to connect wallet');
+    } finally {
+      setIsConnectingState(false);
     }
   };
 
-  // Handle wallet disconnection
-  const handleDisconnect = async () => {
+  const handleLogout = async () => {
     try {
-      await logout();
+      await signingClient?.signOut();
       Alert.alert('Success', 'Wallet disconnected successfully');
     } catch (error) {
-      console.error('Failed to disconnect wallet:', error);
-      Alert.alert('Disconnect Error', 'Failed to disconnect wallet');
+      console.error('Logout error:', error);
+      Alert.alert('Logout Error', 'Failed to disconnect wallet');
     }
   };
 
@@ -191,14 +192,14 @@ export default function ProfileScreen() {
                 <TouchableOpacity
                   style={[
                     styles.walletButton,
-                    isConnecting && styles.walletButtonDisabled,
+                    (isConnecting || isConnectingState) && styles.walletButtonDisabled,
                   ]}
-                  onPress={handleConnect}
-                  disabled={isConnecting}
+                  onPress={handleLogin}
+                  disabled={isConnecting || isConnectingState}
                 >
                   <LogIn size={20} color="#F5F1E8" />
                   <Text style={styles.walletButtonText}>
-                    {isConnecting ? 'Connecting...' : 'Connect Wallet'}
+                    {(isConnecting || isConnectingState) ? 'Connecting...' : 'Connect Wallet'}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -228,7 +229,7 @@ export default function ProfileScreen() {
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.logoutButton}
-                    onPress={handleDisconnect}
+                    onPress={handleLogout}
                   >
                     <LogOut size={16} color="#D97757" />
                     <Text style={styles.logoutButtonText}>Disconnect</Text>
