@@ -10,18 +10,7 @@ import {
   Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import {
-  Plus,
-  CircleCheck as CheckCircle2,
-  Circle,
-  Calendar,
-  Flag,
-  Leaf,
-  Clock,
-  Edit,
-  Trash2,
-  Archive,
-} from 'lucide-react-native';
+import { Plus, CircleCheck as CheckCircle2, Circle, Calendar, Flag, Leaf, Clock, CreditCard as Edit, Trash2, Archive } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Task } from '@/types/xion';
 import { useDocustore } from '@/services/docustoreService';

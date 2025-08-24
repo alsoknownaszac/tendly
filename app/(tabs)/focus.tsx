@@ -12,20 +12,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import {
-  Play,
-  Pause,
-  RotateCcw,
-  Settings,
-  Leaf,
-  Plus,
-  X,
-  Save,
-  Edit,
-  Trash2,
-  Clock,
-  Target,
-} from 'lucide-react-native';
+import { Play, Pause, RotateCcw, Settings, Leaf, Plus, X, Save, CreditCard as Edit, Trash2, Clock, Target } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { FocusSession, Task } from '@/types/xion';
 import { useDocustore } from '@/services/docustoreService';

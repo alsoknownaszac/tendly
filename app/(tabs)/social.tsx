@@ -12,19 +12,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import {
-  Heart,
-  MessageCircle,
-  Share2,
-  Trophy,
-  Star,
-  Users,
-  Plus,
-  X,
-  Send,
-  Edit,
-  Trash2,
-} from 'lucide-react-native';
+import { Heart, MessageCircle, Share2, Trophy, Star, Users, Plus, X, Send, CreditCard as Edit, Trash2 } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SocialPost, Comment, Challenge, User } from '@/types/xion';
 import { useDocustore } from '@/services/docustoreService';
