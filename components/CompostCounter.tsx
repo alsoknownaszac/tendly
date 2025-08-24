@@ -1,5 +1,13 @@
-import React, { useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Animated } from 'react-native';
+import React, { useEffect } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withRepeat,
+  withTiming,
+  withSpring,
+  interpolate,
+} from 'react-native-reanimated';
 import { Leaf, Plus } from 'lucide-react-native';
 
 interface CompostCounterProps {
@@ -7,60 +15,30 @@ interface CompostCounterProps {
 }
 
 export function CompostCounter({ count }: CompostCounterProps) {
-  const scaleAnim = useRef(new Animated.Value(1)).current;
-  const glowAnim = useRef(new Animated.Value(0)).current;
+  const scale = useSharedValue(1);
+  const glow = useSharedValue(0);
 
   useEffect(() => {
-    // Gentle glow animation
-    const glowAnimation = Animated.loop(
-      Animated.sequence([
-        Animated.timing(glowAnim, {
-          toValue: 1,
-          duration: 2000,
-          useNativeDriver: false,
-        }),
-        Animated.timing(glowAnim, {
-          toValue: 0,
-          duration: 2000,
-          useNativeDriver: false,
-        }),
-      ])
-    );
-    
-    glowAnimation.start();
-    
-    return () => glowAnimation.stop();
-  }, []);
+    // Gentle glow animation using react-native-reanimated
+    glow.value = withRepeat(withTiming(1, { duration: 2000 }), -1, true);
+  }, [glow]);
 
   const handlePress = () => {
-    Animated.sequence([
-      Animated.timing(scaleAnim, {
-        toValue: 0.95,
-        duration: 100,
-        useNativeDriver: true,
-      }),
-      Animated.timing(scaleAnim, {
-        toValue: 1,
-        duration: 100,
-        useNativeDriver: true,
-      }),
-    ]).start();
+    scale.value = withSpring(0.95, { duration: 100 }, () => {
+      scale.value = withSpring(1, { duration: 100 });
+    });
   };
+
+  const animatedStyle = useAnimatedStyle(() => {
+    return {
+      transform: [{ scale: scale.value }],
+      shadowOpacity: interpolate(glow.value, [0, 1], [0.1, 0.3]),
+    };
+  });
 
   return (
     <TouchableOpacity onPress={handlePress}>
-      <Animated.View
-        style={[
-          styles.container,
-          {
-            transform: [{ scale: scaleAnim }],
-            shadowOpacity: glowAnim.interpolate({
-              inputRange: [0, 1],
-              outputRange: [0.1, 0.3],
-            }),
-          },
-        ]}
-      >
+      <Animated.View style={[styles.container, animatedStyle]}>
         <View style={styles.iconContainer}>
           <Leaf size={16} color="#87A96B" />
         </View>

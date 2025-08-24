@@ -43,11 +43,11 @@ type RootStackParamList = {
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'index'>;
 
-if (!process.env.EXPO_PUBLIC_DOCUSTORE_CONTRACT_ADDRESS) {
-  throw new Error(
-    'EXPO_PUBLIC_DOCUSTORE_CONTRACT_ADDRESS is not set in your environment file'
-  );
-}
+// if (!process.env.EXPO_PUBLIC_DOCUSTORE_CONTRACT_ADDRESS) {
+//   throw new Error(
+//     'EXPO_PUBLIC_DOCUSTORE_CONTRACT_ADDRESS is not set in your environment file'
+//   );
+// }
 
 // Add retry utility function
 const sleep = (ms: number): Promise<void> =>
@@ -655,11 +655,12 @@ export default function GardenScreen() {
                         {task.title}
                       </Text>
                       <Text style={styles.completedTime}>
-                        Completed{' '}
-                        {task.completedAt?.toLocaleTimeString([], {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
+                        {task?.completedAt
+                          ? new Date(task.completedAt).toLocaleTimeString([], {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })
+                          : 'Not completed'}
                       </Text>
                     </View>
                   </TouchableOpacity>

@@ -1,5 +1,12 @@
 import React, { useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Animated, ViewStyle } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Animated,
+  ViewStyle,
+} from 'react-native';
 import { Sprout, Flower, TreePine } from 'lucide-react-native';
 
 interface Plant {
@@ -44,7 +51,7 @@ export function GardenPlant({ plant, style }: GardenPlantProps) {
         }),
       ])
     );
-    
+
     breathingAnimation.start();
 
     return () => breathingAnimation.stop();
@@ -64,7 +71,11 @@ export function GardenPlant({ plant, style }: GardenPlantProps) {
     return 48;
   };
 
-  const daysGrowing = Math.floor((Date.now() - plant.planted.getTime()) / (1000 * 60 * 60 * 24));
+  const daysGrowing = plant.planted
+    ? Math.floor(
+        (Date.now() - new Date(plant.planted).getTime()) / (1000 * 60 * 60 * 24)
+      )
+    : 0; // Default to 0 if `planted` is undefined
 
   return (
     <TouchableOpacity style={[styles.container, style]}>
