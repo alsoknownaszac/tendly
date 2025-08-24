@@ -39,7 +39,7 @@ export default function TasksScreen() {
   });
 
   // Blockchain integration
-  const { data: account } = useAbstraxionAccount();
+  const account = useAbstraxionAccount();
   const { docustoreService, isConnected } = useDocustore();
 
   // Load tasks from storage on component mount
@@ -213,7 +213,7 @@ export default function TasksScreen() {
     try {
       const task: Task = {
         id: Date.now().toString(),
-        userId: account?.bech32Address || 'local_user',
+        userId: account?.publicKey || 'local_user',
         title: newTask.title.trim(),
         description: newTask.description.trim(),
         priority: newTask.priority,
@@ -510,7 +510,7 @@ export default function TasksScreen() {
               <Text style={styles.title}>Task Garden</Text>
               <Text style={styles.subtitle}>
                 {pendingTasks.length} tasks to plant • {completedTasks.length}{' '}
-                growing{isConnected && ' • ⛓️ Synced'}
+                growing{account && ' • ⛓️ Synced'}
               </Text>
             </View>
             <TouchableOpacity

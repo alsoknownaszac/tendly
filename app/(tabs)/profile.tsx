@@ -24,24 +24,13 @@ import {
 import {
   useAbstraxionAccount,
   useAbstraxionSigningClient,
-  useAbstraxionClient,
 } from '@burnt-labs/abstraxion-react-native';
 
 export default function ProfileScreen() {
-  const { 
-    data: account, 
-    isConnected, 
-    isConnecting 
-  } = useAbstraxionAccount();
+  const account = useAbstraxionAccount();
+  const { client: signingClient } = useAbstraxionSigningClient();
+  const [isConnecting, setIsConnecting] = useState(false);
   
-  const { 
-    client: signingClient, 
-    logout 
-  } = useAbstraxionSigningClient();
-  
-  const { 
-    client: queryClient 
-  } = useAbstraxionClient();
 
   const [stats] = useState({
     level: 8,
@@ -56,18 +45,20 @@ export default function ProfileScreen() {
   // Handle wallet connection
   const handleConnect = async () => {
     try {
-      // Connection is handled automatically by the provider
-      console.log('Connecting wallet...');
+      setIsConnecting(true);
+      await signingClient?.signIn();
     } catch (error) {
       console.error('Failed to connect wallet:', error);
       Alert.alert('Connection Error', 'Failed to connect wallet');
+    } finally {
+      setIsConnecting(false);
     }
   };
 
   // Handle wallet disconnection
   const handleDisconnect = async () => {
     try {
-      await logout();
+      await signingClient?.signOut();
       Alert.alert('Success', 'Wallet disconnected successfully');
     } catch (error) {
       console.error('Failed to disconnect wallet:', error);
@@ -77,11 +68,11 @@ export default function ProfileScreen() {
 
   // View blockchain transactions
   const viewOnExplorer = () => {
-    if (account?.bech32Address) {
-      const explorerUrl = `https://explorer.burnt.com/xion-testnet-1/account/${account.bech32Address}`;
+    if (account?.publicKey) {
+      const explorerUrl = `https://explorer.burnt.com/xion-testnet-1/account/${account.publicKey}`;
       Alert.alert(
         'View on Explorer',
-        `Address: ${account.bech32Address}`,
+        `Address: ${account.publicKey}`,
         [
           { text: 'Cancel', style: 'cancel' },
           { 
@@ -178,7 +169,7 @@ export default function ProfileScreen() {
 
           {/* XION Wallet Connection */}
           <View style={styles.walletSection}>
-            {!isConnected ? (
+            {!account ? (
               <View style={styles.walletCard}>
                 <View style={styles.walletHeader}>
                   <Wallet size={24} color="#87A96B" />
@@ -211,18 +202,20 @@ export default function ProfileScreen() {
                 <View style={styles.walletInfo}>
                   <Text style={styles.walletLabel}>Address:</Text>
                   <Text style={styles.walletAddress}>
-                    {account?.bech32Address
-                      ? `${account.bech32Address.slice(
+                    {account?.publicKey
+                      ? `${account.publicKey.slice(
                           0,
                           12
-                        )}...${account.bech32Address.slice(-8)}`
+                        )}...${account.publicKey.slice(-8)}`
                       : 'Loading...'}
                   </Text>
                 </View>
                 <View style={styles.walletActions}>
-                  <TouchableOpacity style={styles.explorerButton}>
-                    <Text style={styles.explorerButtonText}>
+                  <TouchableOpacity 
+                    style={styles.explorerButton}
                     onPress={viewOnExplorer}
+                  >
+                    <Text style={styles.explorerButtonText}>
                       View on Explorer
                     </Text>
                   </TouchableOpacity>
@@ -349,7 +342,7 @@ export default function ProfileScreen() {
                 <View
                   style={[
                     styles.statusBadge,
-                    isConnected
+                    account
                       ? styles.connectedBadge
                       : styles.disconnectedBadge,
                   ]}
@@ -357,27 +350,27 @@ export default function ProfileScreen() {
                   <Text
                     style={[
                       styles.statusText,
-                      isConnected
+                      account
                         ? styles.connectedText
                         : styles.disconnectedText,
                     ]}
                   >
-                    {isConnected ? 'Verified' : 'Offline'}
+                    {account ? 'Verified' : 'Offline'}
                   </Text>
                 </View>
               </View>
               <Text style={styles.blockchainDescription}>
-                {isConnected
+                {account
                   ? 'Your achievements are secured on-chain with zkTLS verification'
-                  : 'Connect your wallet to enable blockchain verification of achievements'}
+                {account && ' • ⛓️ Synced'}
               </Text>
-              {isConnected && (
+              {account && (
                 <TouchableOpacity style={styles.blockchainButton}>
                   <Text style={styles.blockchainButtonText}>
                     View Verified Achievements
                   </Text>
-                </TouchableOpacity>
-              )}
+              <Text style={styles.statNumber}>{account ? '⛓️' : '📱'}</Text>
+              <Text style={styles.statLabel}>{account ? 'On-Chain' : 'Local'}</Text>
             </View>
           </View>
         </ScrollView>
