@@ -48,7 +48,7 @@ export default function SocialScreen() {
   const [newComment, setNewComment] = useState('');
 
   // Blockchain integration
-  const account = useAbstraxionAccount();
+  const { data: account } = useAbstraxionAccount();
   const { docustoreService, isConnected } = useDocustore();
 
   useEffect(() => {
@@ -255,7 +255,7 @@ export default function SocialScreen() {
       return;
     }
 
-    const userId = account?.publicKey || userProfile?.id || 'local_user';
+    const userId = account?.bech32Address || userProfile?.id || 'local_user';
 
     try {
       const post: SocialPost = {
@@ -541,7 +541,6 @@ export default function SocialScreen() {
               <Text style={styles.title}>Garden Community</Text>
               <Text style={styles.subtitle}>
                 Share your growth journey{isConnected && ' • ⛓️ Synced'}
-                Share your growth journey{account && ' • ⛓️ Synced'}
               </Text>
             </View>
             <TouchableOpacity

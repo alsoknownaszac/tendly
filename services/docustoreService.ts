@@ -230,7 +230,7 @@ export class DocustoreService {
 
 // Hook to use docustore service
 export function useDocustore() {
-  const account = useAbstraxionAccount();
+  const { data: account, isConnected } = useAbstraxionAccount();
   const { client: signingClient } = useAbstraxionSigningClient();
   const { client: queryClient } = useAbstraxionClient();
 
@@ -242,7 +242,7 @@ export function useDocustore() {
 
   return {
     docustoreService,
-    isConnected: !!account,
+    isConnected,
     account,
   };
 }

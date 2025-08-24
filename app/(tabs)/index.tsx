@@ -47,6 +47,8 @@ type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'index'>;
 // Docustore Service for XION blockchain integration
 import {
   useAbstraxionAccount,
+  useAbstraxionSigningClient,
+  useAbstraxionClient,
 } from '@burnt-labs/abstraxion-react-native';
 
 export interface DocustoreDocument {
@@ -361,10 +363,21 @@ export default function GardenScreen() {
   });
 
   // Abstraxion hooks - always call them unconditionally
-  const account = useAbstraxionAccount();
+  const abstraxionAccount = useAbstraxionAccount();
+  const abstraxionSigningClient = useAbstraxionSigningClient();
+  const abstraxionClient = useAbstraxionClient();
   const { docustoreService, isConnected } = useDocustore();
   const navigation = useNavigation<NavigationProp>();
 
+  // Destructure with fallbacks to ensure stable references
+  const {
+    data: account,
+    logout,
+    login,
+    isConnecting,
+  } = abstraxionAccount || {};
+  const { client } = abstraxionSigningClient || {};
+  const { client: queryClient } = abstraxionClient || {};
 
   // Load data on component mount
   useEffect(() => {
@@ -574,7 +587,7 @@ export default function GardenScreen() {
     try {
       const task: Task = {
         id: Date.now().toString(),
-        userId: account?.publicKey || 'local_user',
+        userId: account?.bech32Address || 'local_user',
         title: newTask.title.trim(),
         description: newTask.description.trim(),
         priority: newTask.priority,
@@ -914,7 +927,7 @@ export default function GardenScreen() {
               <Text style={styles.greeting}>Good morning! 🌱</Text>
               <Text style={styles.subtitle}>
                 {pendingTasks.length} tasks to plant • {plants.length} growing
-                {account && ' • ⛓️ Synced'}
+                {isConnected && ' • ⛓️ Synced'}
               </Text>
             </View>
             <CompostCounter count={compost} />
@@ -1087,8 +1100,8 @@ export default function GardenScreen() {
               <Text style={styles.statLabel}>Compost</Text>
             </View>
             <View style={styles.statItem}>
-              <Text style={styles.statNumber}>{account ? '⛓️' : '📱'}</Text>
-              <Text style={styles.statLabel}>{account ? 'On-Chain' : 'Local'}</Text>
+              <Text style={styles.statNumber}>{isConnected ? '⛓️' : '📱'}</Text>
+              <Text style={styles.statLabel}>{isConnected ? 'On-Chain' : 'Local'}</Text>
             </View>
           </View>
         </ScrollView>

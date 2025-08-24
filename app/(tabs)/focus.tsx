@@ -71,7 +71,7 @@ export default function FocusScreen() {
     useState<FocusSession['mood']>('focused');
 
   // Blockchain integration
-  const account = useAbstraxionAccount();
+  const { data: account } = useAbstraxionAccount();
   const { docustoreService, isConnected } = useDocustore();
 
   const totalSeconds = minutes * 60 + seconds;
@@ -234,7 +234,7 @@ export default function FocusScreen() {
     try {
       const session: FocusSession = {
         id: Date.now().toString(),
-        userId: account?.publicKey || 'local_user',
+        userId: account?.bech32Address || 'local_user',
         taskId: selectedTask?.id,
         duration: settings.defaultFocusTime * 60 - totalSeconds,
         plannedDuration: settings.defaultFocusTime * 60,
@@ -477,7 +477,7 @@ export default function FocusScreen() {
             <Text style={styles.subtitle}>
               Session {todaySessions.length + 1} •{' '}
               {mode === 'focus' ? 'Grow your plants' : 'Rest and recharge'}
-              {account && ' • ⛓️ Synced'}
+              {isConnected && ' • ⛓️ Synced'}
             </Text>
           </View>
 
