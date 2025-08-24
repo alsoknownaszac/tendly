@@ -24,9 +24,19 @@ import {
 } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Task } from '@/types/xion';
+import { useDocustore } from '@/services/docustoreService';
+import {
+  useAbstraxionAccount,
+} from '@burnt-labs/abstraxion-react-native';
 
 const TASKS_STORAGE_KEY = '@tendly_tasks';
 
+// Document type for blockchain storage
+interface TaskDocument {
+  type: 'task';
+  task: Task;
+  timestamp: number;
+}
 export default function TasksScreen() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
@@ -39,19 +49,58 @@ export default function TasksScreen() {
     category: 'personal' as const,
   });
 
+  // Blockchain integration
+  const { data: account } = useAbstraxionAccount();
+  const { docustoreService, isConnected } = useDocustore();
+
   // Load tasks from storage on component mount
   useEffect(() => {
     loadTasks();
   }, []);
 
+  // Sync to blockchain when tasks change
+  useEffect(() => {
+    if (!loading && isConnected) {
+      syncTasksToBlockchain();
+    }
+  }, [tasks, isConnected]);
+
+  const syncTasksToBlockchain = async () => {
+    try {
+      if (!isConnected || !docustoreService) return;
+
+      // Store tasks collection on blockchain
+      const tasksDoc = {
+        type: 'tasks_collection',
+        tasks,
+        timestamp: Date.now(),
+      };
+
+      await docustoreService.storeDocument(tasksDoc);
+      console.log('Tasks synced to blockchain');
+    } catch (error) {
+      console.warn('Failed to sync tasks to blockchain:', error);
+    }
+  };
   const loadTasks = async () => {
     try {
       setLoading(true);
+
+      // Try to load from blockchain first if connected
+      if (isConnected && docustoreService) {
+        const loadedFromBlockchain = await loadTasksFromBlockchain();
+        if (loadedFromBlockchain) {
+          setLoading(false);
+          return;
+        }
+      }
+
       const storedTasks = await AsyncStorage.getItem(TASKS_STORAGE_KEY);
       if (storedTasks) {
         const parsedTasks = JSON.parse(storedTasks).map((task: any) => ({
           ...task,
           createdAt: new Date(task.createdAt),
+          updatedAt: new Date(task.updatedAt),
           completedAt: task.completedAt
             ? new Date(task.completedAt)
             : undefined,
@@ -63,41 +112,47 @@ export default function TasksScreen() {
         const sampleTasks: Task[] = [
           {
             id: '1',
+            userId: account?.bech32Address || 'local_user',
             title: 'Morning workout',
             description: 'Complete 30-minute cardio session',
             priority: 'high',
             category: 'health',
-            completed: false,
+            status: 'pending',
             plantType: 'tree',
             compostReward: 15,
             createdAt: new Date(),
+            updatedAt: new Date(),
             dueDate: new Date(Date.now() + 2 * 60 * 60 * 1000),
-            archived: false,
+            tags: ['fitness', 'morning'],
           },
           {
             id: '2',
+            userId: account?.bech32Address || 'local_user',
             title: 'Review project proposal',
             description: 'Read through and provide feedback',
             priority: 'medium',
             category: 'work',
-            completed: true,
+            status: 'completed',
             plantType: 'flower',
             compostReward: 10,
             createdAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+            updatedAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
             completedAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
-            archived: false,
+            tags: ['work', 'review'],
           },
           {
             id: '3',
+            userId: account?.bech32Address || 'local_user',
             title: 'Call mom',
             description: 'Weekly check-in call',
             priority: 'low',
             category: 'personal',
-            completed: false,
+            status: 'pending',
             plantType: 'sprout',
             compostReward: 5,
             createdAt: new Date(),
-            archived: false,
+            updatedAt: new Date(),
+            tags: ['family', 'personal'],
           },
         ];
         setTasks(sampleTasks);
@@ -108,6 +163,42 @@ export default function TasksScreen() {
       Alert.alert('Error', 'Failed to load tasks');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadTasksFromBlockchain = async (): Promise<boolean> => {
+    try {
+      if (!docustoreService || !account?.bech32Address) return false;
+
+      const documents = await docustoreService.queryDocuments({
+        owner: account.bech32Address,
+        limit: 1,
+      });
+
+      const tasksDoc = documents
+        .filter((doc) => doc.data.type === 'tasks_collection')
+        .sort((a, b) => b.data.timestamp - a.data.timestamp)[0];
+
+      if (tasksDoc) {
+        const tasksData = tasksDoc.data.tasks;
+        
+        // Parse dates for tasks
+        const tasksWithDates = tasksData.map((task: any) => ({
+          ...task,
+          createdAt: new Date(task.createdAt),
+          updatedAt: new Date(task.updatedAt),
+          completedAt: task.completedAt ? new Date(task.completedAt) : undefined,
+          dueDate: task.dueDate ? new Date(task.dueDate) : undefined,
+        }));
+
+        setTasks(tasksWithDates);
+        return true;
+      }
+
+      return false;
+    } catch (error) {
+      console.warn('Failed to load tasks from blockchain:', error);
+      return false;
     }
   };
 
@@ -133,11 +224,12 @@ export default function TasksScreen() {
     try {
       const task: Task = {
         id: Date.now().toString(),
+        userId: account?.bech32Address || 'local_user',
         title: newTask.title.trim(),
         description: newTask.description.trim(),
         priority: newTask.priority,
         category: newTask.category,
-        completed: false,
+        status: 'pending',
         plantType:
           newTask.priority === 'high'
             ? 'tree'
@@ -151,12 +243,35 @@ export default function TasksScreen() {
             ? 10
             : 5,
         createdAt: new Date(),
-        archived: false,
+        updatedAt: new Date(),
+        tags: [],
       };
 
       const updatedTasks = [task, ...tasks];
       setTasks(updatedTasks);
       await saveTasks(updatedTasks);
+
+      // Store on blockchain if connected
+      if (isConnected && docustoreService) {
+        try {
+          const taskDoc: TaskDocument = {
+            type: 'task',
+            task,
+            timestamp: Date.now(),
+          };
+          const docId = await docustoreService.storeDocument(taskDoc);
+          
+          // Update task with blockchain document ID
+          const taskWithDocId = { ...task, blockchainDocId: docId };
+          const tasksWithDocId = updatedTasks.map(t => 
+            t.id === task.id ? taskWithDocId : t
+          );
+          setTasks(tasksWithDocId);
+          await saveTasks(tasksWithDocId);
+        } catch (error) {
+          console.warn('Failed to store task on blockchain:', error);
+        }
+      }
 
       // Reset form
       setNewTask({
@@ -200,6 +315,7 @@ export default function TasksScreen() {
             : newTask.priority === 'medium'
             ? 10
             : 5,
+        updatedAt: new Date(),
       };
 
       const updatedTasks = tasks.map((task) =>
@@ -208,6 +324,20 @@ export default function TasksScreen() {
 
       setTasks(updatedTasks);
       await saveTasks(updatedTasks);
+
+      // Update on blockchain if connected
+      if (isConnected && docustoreService && editingTask.blockchainDocId) {
+        try {
+          const taskDoc: TaskDocument = {
+            type: 'task',
+            task: updatedTask,
+            timestamp: Date.now(),
+          };
+          await docustoreService.updateDocument(editingTask.blockchainDocId, taskDoc);
+        } catch (error) {
+          console.warn('Failed to update task on blockchain:', error);
+        }
+      }
 
       // Reset form
       setNewTask({
@@ -231,11 +361,12 @@ export default function TasksScreen() {
     try {
       const updatedTasks = tasks.map((task) => {
         if (task.id === taskId) {
-          const isCompleting = !task.completed;
+          const isCompleting = task.status !== 'completed';
           return {
             ...task,
-            completed: isCompleting,
+            status: isCompleting ? 'completed' : 'pending',
             completedAt: isCompleting ? new Date() : undefined,
+            updatedAt: new Date(),
           };
         }
         return task;
@@ -245,7 +376,7 @@ export default function TasksScreen() {
       await saveTasks(updatedTasks);
 
       const task = tasks.find((t) => t.id === taskId);
-      if (task && !task.completed) {
+      if (task && task.status !== 'completed') {
         Alert.alert(
           'Great job!',
           `You earned ${task.compostReward} compost! 🌱`
@@ -261,7 +392,11 @@ export default function TasksScreen() {
   const archiveTask = async (taskId: string) => {
     try {
       const updatedTasks = tasks.map((task) =>
-        task.id === taskId ? { ...task, archived: true } : task
+        task.id === taskId ? { 
+          ...task, 
+          status: 'archived',
+          updatedAt: new Date()
+        } : task
       );
 
       setTasks(updatedTasks);
@@ -286,9 +421,20 @@ export default function TasksScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
+              const taskToDelete = tasks.find(t => t.id === taskId);
               const updatedTasks = tasks.filter((task) => task.id !== taskId);
               setTasks(updatedTasks);
               await saveTasks(updatedTasks);
+
+              // Delete from blockchain if connected
+              if (isConnected && docustoreService && taskToDelete?.blockchainDocId) {
+                try {
+                  await docustoreService.deleteDocument(taskToDelete.blockchainDocId);
+                } catch (error) {
+                  console.warn('Failed to delete task from blockchain:', error);
+                }
+              }
+
               Alert.alert('Success', 'Task deleted successfully!');
             } catch (error) {
               console.error('Error deleting task:', error);
@@ -353,9 +499,9 @@ export default function TasksScreen() {
   };
 
   // Filter out archived tasks for display
-  const activeTasks = tasks.filter((task) => !task.archived);
-  const completedTasks = activeTasks.filter((task) => task.completed);
-  const pendingTasks = activeTasks.filter((task) => !task.completed);
+  const activeTasks = tasks.filter((task) => task.status !== 'archived');
+  const completedTasks = activeTasks.filter((task) => task.status === 'completed');
+  const pendingTasks = activeTasks.filter((task) => task.status === 'pending');
 
   if (loading) {
     return (
@@ -375,7 +521,7 @@ export default function TasksScreen() {
               <Text style={styles.title}>Task Garden</Text>
               <Text style={styles.subtitle}>
                 {pendingTasks.length} tasks to plant • {completedTasks.length}{' '}
-                growing
+                growing{isConnected && ' • ⛓️ Synced'}
               </Text>
             </View>
             <TouchableOpacity
@@ -434,6 +580,9 @@ export default function TasksScreen() {
                           <Text style={styles.rewardText}>
                             +{task.compostReward} compost
                           </Text>
+                          {task.blockchainDocId && (
+                            <Text style={styles.blockchainIndicator}>⛓️</Text>
+                          )}
                         </View>
                         {task.dueDate && (
                           <View style={styles.dueDate}>
@@ -808,6 +957,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#87A96B',
     fontWeight: '500',
+  },
+  blockchainIndicator: {
+    fontSize: 12,
+    color: '#87A96B',
+    marginLeft: 4,
   },
   dueDate: {
     flexDirection: 'row',

@@ -28,6 +28,10 @@ import {
 } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { FocusSession, Task } from '@/types/xion';
+import { useDocustore } from '@/services/docustoreService';
+import {
+  useAbstraxionAccount,
+} from '@burnt-labs/abstraxion-react-native';
 
 const STORAGE_KEYS = {
   FOCUS_SESSIONS: 'tendly_focus_sessions',
@@ -35,6 +39,12 @@ const STORAGE_KEYS = {
   TASKS: 'tendly_tasks',
 };
 
+// Document type for blockchain storage
+interface FocusSessionDocument {
+  type: 'focus_session';
+  session: FocusSession;
+  timestamp: number;
+}
 interface FocusSettings {
   defaultFocusTime: number;
   shortBreakTime: number;
@@ -72,6 +82,10 @@ export default function FocusScreen() {
   const [sessionNotes, setSessionNotes] = useState('');
   const [sessionMood, setSessionMood] =
     useState<FocusSession['mood']>('focused');
+
+  // Blockchain integration
+  const { data: account } = useAbstraxionAccount();
+  const { docustoreService, isConnected } = useDocustore();
 
   const totalSeconds = minutes * 60 + seconds;
   const initialSeconds =
@@ -233,7 +247,7 @@ export default function FocusScreen() {
     try {
       const session: FocusSession = {
         id: Date.now().toString(),
-        userId: 'user1',
+        userId: account?.bech32Address || 'local_user',
         taskId: selectedTask?.id,
         duration: settings.defaultFocusTime * 60 - totalSeconds,
         plannedDuration: settings.defaultFocusTime * 60,
@@ -256,6 +270,27 @@ export default function FocusScreen() {
 
       const updatedSessions = [session, ...sessions];
       setSessions(updatedSessions);
+
+      // Store on blockchain if connected
+      if (isConnected && docustoreService) {
+        try {
+          const sessionDoc: FocusSessionDocument = {
+            type: 'focus_session',
+            session,
+            timestamp: Date.now(),
+          };
+          const docId = await docustoreService.storeDocument(sessionDoc);
+          
+          // Update session with blockchain document ID
+          const sessionWithDocId = { ...session, blockchainDocId: docId };
+          const sessionsWithDocId = updatedSessions.map(s => 
+            s.id === session.id ? sessionWithDocId : s
+          );
+          setSessions(sessionsWithDocId);
+        } catch (error) {
+          console.warn('Failed to store focus session on blockchain:', error);
+        }
+      }
 
       setCurrentSession(null);
       setSessionNotes('');
@@ -287,6 +322,20 @@ export default function FocusScreen() {
       );
 
       setSessions(updatedSessions);
+
+      // Update on blockchain if connected
+      if (isConnected && docustoreService && editingSession.blockchainDocId) {
+        try {
+          const sessionDoc: FocusSessionDocument = {
+            type: 'focus_session',
+            session: updatedSession,
+            timestamp: Date.now(),
+          };
+          await docustoreService.updateDocument(editingSession.blockchainDocId, sessionDoc);
+        } catch (error) {
+          console.warn('Failed to update focus session on blockchain:', error);
+        }
+      }
 
       setEditingSession(null);
       setSessionNotes('');
@@ -441,6 +490,7 @@ export default function FocusScreen() {
             <Text style={styles.subtitle}>
               Session {todaySessions.length + 1} •{' '}
               {mode === 'focus' ? 'Grow your plants' : 'Rest and recharge'}
+              {isConnected && ' • ⛓️ Synced'}
             </Text>
           </View>
 

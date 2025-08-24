@@ -34,6 +34,7 @@ import { GardenPlant } from '@/components/GardenPlant';
 import { WeatherMood } from '@/components/WeatherMood';
 import { CompostCounter } from '@/components/CompostCounter';
 import { Task, Plant } from '@/types/xion';
+import { useDocustore } from '@/services/docustoreService';
 
 const { width } = Dimensions.get('window');
 
@@ -82,6 +83,27 @@ const STORAGE_KEYS = {
   MOOD: 'tendly_mood',
 };
 
+// Document types for blockchain storage
+interface TaskDocument {
+  type: 'task';
+  task: Task;
+  timestamp: number;
+}
+
+interface PlantDocument {
+  type: 'plant';
+  plant: Plant;
+  timestamp: number;
+}
+
+interface GardenDocument {
+  type: 'garden_state';
+  tasks: Task[];
+  plants: Plant[];
+  compost: number;
+  mood: 'sunny' | 'cloudy' | 'rainy';
+  timestamp: number;
+}
 export default function GardenScreen() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [plants, setPlants] = useState<Plant[]>([]);
@@ -101,6 +123,7 @@ export default function GardenScreen() {
   const abstraxionAccount = useAbstraxionAccount();
   const abstraxionSigningClient = useAbstraxionSigningClient();
   const abstraxionClient = useAbstraxionClient();
+  const { docustoreService, isConnected } = useDocustore();
   const navigation = useNavigation<NavigationProp>();
 
   // Destructure with fallbacks to ensure stable references
@@ -108,7 +131,6 @@ export default function GardenScreen() {
     data: account,
     logout,
     login,
-    isConnected,
     isConnecting,
   } = abstraxionAccount || {};
   const { client } = abstraxionSigningClient || {};
@@ -123,12 +145,92 @@ export default function GardenScreen() {
   useEffect(() => {
     if (!isLoading) {
       saveData();
+      // Sync to blockchain if connected
+      if (isConnected) {
+        syncToBlockchain();
+      }
     }
   }, [tasks, plants, compost, mood]);
 
+  // Sync data to blockchain
+  const syncToBlockchain = async () => {
+    try {
+      if (!isConnected || !docustoreService) return;
+
+      const gardenState: GardenDocument = {
+        type: 'garden_state',
+        tasks,
+        plants,
+        compost,
+        mood,
+        timestamp: Date.now(),
+      };
+
+      await docustoreService.storeDocument(gardenState);
+      console.log('Garden state synced to blockchain');
+    } catch (error) {
+      console.warn('Failed to sync to blockchain:', error);
+    }
+  };
+
+  // Load data from blockchain
+  const loadFromBlockchain = async () => {
+    try {
+      if (!isConnected || !docustoreService) return false;
+
+      const documents = await docustoreService.queryDocuments({
+        owner: account?.bech32Address,
+        limit: 1,
+      });
+
+      const gardenDoc = documents
+        .filter((doc) => doc.data.type === 'garden_state')
+        .sort((a, b) => b.data.timestamp - a.data.timestamp)[0];
+
+      if (gardenDoc) {
+        const gardenData = gardenDoc.data as GardenDocument;
+        
+        // Parse dates for tasks
+        const tasksWithDates = gardenData.tasks.map((task: any) => ({
+          ...task,
+          createdAt: new Date(task.createdAt),
+          updatedAt: new Date(task.updatedAt),
+          completedAt: task.completedAt ? new Date(task.completedAt) : undefined,
+          dueDate: task.dueDate ? new Date(task.dueDate) : undefined,
+        }));
+
+        // Parse dates for plants
+        const plantsWithDates = gardenData.plants.map((plant: any) => ({
+          ...plant,
+          plantedAt: new Date(plant.plantedAt),
+        }));
+
+        setTasks(tasksWithDates);
+        setPlants(plantsWithDates);
+        setCompost(gardenData.compost);
+        setMood(gardenData.mood);
+
+        return true;
+      }
+
+      return false;
+    } catch (error) {
+      console.warn('Failed to load from blockchain:', error);
+      return false;
+    }
+  };
   const loadData = async () => {
     try {
       setIsLoading(true);
+
+      // Try to load from blockchain first if connected
+      if (isConnected) {
+        const loadedFromBlockchain = await loadFromBlockchain();
+        if (loadedFromBlockchain) {
+          setLoading(false);
+          return;
+        }
+      }
 
       const [storedTasks, storedPlants, storedCompost, storedMood] =
         await Promise.all([
@@ -242,11 +344,12 @@ export default function GardenScreen() {
     try {
       const task: Task = {
         id: Date.now().toString(),
+        userId: account?.bech32Address || 'local_user',
         title: newTask.title.trim(),
         description: newTask.description.trim(),
         priority: newTask.priority,
         category: newTask.category,
-        completed: false,
+        status: 'pending',
         plantType:
           newTask.priority === 'high'
             ? 'tree'
@@ -260,9 +363,26 @@ export default function GardenScreen() {
             ? 10
             : 5,
         createdAt: new Date(),
+        updatedAt: new Date(),
+        tags: [],
       };
 
       setTasks((prev) => [task, ...prev]);
+
+      // Store individual task on blockchain if connected
+      if (isConnected && docustoreService) {
+        try {
+          const taskDoc: TaskDocument = {
+            type: 'task',
+            task,
+            timestamp: Date.now(),
+          };
+          await docustoreService.storeDocument(taskDoc);
+        } catch (error) {
+          console.warn('Failed to store task on blockchain:', error);
+        }
+      }
+
       setNewTask({
         title: '',
         description: '',
@@ -310,6 +430,20 @@ export default function GardenScreen() {
       setTasks((prev) =>
         prev.map((task) => (task.id === editingTask.id ? updatedTask : task))
       );
+
+      // Update on blockchain if connected
+      if (isConnected && docustoreService && editingTask.blockchainDocId) {
+        try {
+          const taskDoc: TaskDocument = {
+            type: 'task',
+            task: updatedTask,
+            timestamp: Date.now(),
+          };
+          await docustoreService.updateDocument(editingTask.blockchainDocId, taskDoc);
+        } catch (error) {
+          console.warn('Failed to update task on blockchain:', error);
+        }
+      }
 
       setEditingTask(null);
       setNewTask({
@@ -362,17 +496,18 @@ export default function GardenScreen() {
 
       const updatedTask: Task = {
         ...task,
-        completed: !task.completed,
-        completedAt: !task.completed ? new Date() : undefined,
+        status: task.status === 'completed' ? 'pending' : 'completed',
+        completedAt: task.status !== 'completed' ? new Date() : undefined,
         updatedAt: new Date(),
       };
 
       setTasks((prev) => prev.map((t) => (t.id === taskId ? updatedTask : t)));
 
       // If completing task, create a plant and award compost
-      if (!task.completed) {
+      if (task.status !== 'completed') {
         const newPlant: Plant = {
           id: Date.now().toString(),
+          userId: account?.bech32Address || 'local_user',
           taskId: task.id,
           type:
             task.plantType === 'sprout'
@@ -380,16 +515,43 @@ export default function GardenScreen() {
               : task.plantType === 'flower'
               ? 'flower'
               : 'tree',
+          species: {
+            id: 'basic',
+            name: `Basic ${task.plantType}`,
+            emoji: task.plantType === 'tree' ? '🌳' : task.plantType === 'flower' ? '🌸' : '🌱',
+            rarity: 'common',
+            growthRate: 1.0,
+            compostRequirement: task.compostReward,
+            description: `A ${task.plantType} grown from completing "${task.title}"`,
+            unlockConditions: [],
+          },
           growth: 25,
+          health: 100,
           position: {
             x: Math.random() * (width - 120) + 60,
             y: Math.random() * 200 + 150,
           },
           plantedAt: new Date(),
+          isRare: false,
+          specialTraits: [],
         };
 
         setPlants((prev) => [...prev, newPlant]);
         setCompost((prev) => prev + task.compostReward);
+
+        // Store plant on blockchain if connected
+        if (isConnected && docustoreService) {
+          try {
+            const plantDoc: PlantDocument = {
+              type: 'plant',
+              plant: newPlant,
+              timestamp: Date.now(),
+            };
+            await docustoreService.storeDocument(plantDoc);
+          } catch (error) {
+            console.warn('Failed to store plant on blockchain:', error);
+          }
+        }
 
         Alert.alert(
           'Task Completed! 🎉',
@@ -497,8 +659,8 @@ export default function GardenScreen() {
 
   // Filter tasks for display
   const activeTasks = tasks.filter((task) => !task.archived);
-  const pendingTasks = activeTasks.filter((task) => !task.completed);
-  const completedTasks = activeTasks.filter((task) => task.completed);
+  const pendingTasks = activeTasks.filter((task) => task.status === 'pending');
+  const completedTasks = activeTasks.filter((task) => task.status === 'completed');
 
   if (isLoading) {
     return (
@@ -522,6 +684,7 @@ export default function GardenScreen() {
               <Text style={styles.greeting}>Good morning! 🌱</Text>
               <Text style={styles.subtitle}>
                 {pendingTasks.length} tasks to plant • {plants.length} growing
+                {isConnected && ' • ⛓️ Synced'}
               </Text>
             </View>
             <CompostCounter count={compost} />
@@ -613,6 +776,9 @@ export default function GardenScreen() {
                         <Text style={styles.rewardText}>
                           +{task.compostReward}
                         </Text>
+                        {task.blockchainDocId && (
+                          <Text style={styles.blockchainIndicator}>⛓️</Text>
+                        )}
                       </View>
                     </View>
                   </TouchableOpacity>
@@ -689,6 +855,10 @@ export default function GardenScreen() {
             <View style={styles.statItem}>
               <Text style={styles.statNumber}>{compost}</Text>
               <Text style={styles.statLabel}>Compost</Text>
+            </View>
+            <View style={styles.statItem}>
+              <Text style={styles.statNumber}>{isConnected ? '⛓️' : '📱'}</Text>
+              <Text style={styles.statLabel}>{isConnected ? 'On-Chain' : 'Local'}</Text>
             </View>
           </View>
         </ScrollView>
@@ -980,6 +1150,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#87A96B',
     fontWeight: '500',
+  },
+  blockchainIndicator: {
+    fontSize: 12,
+    color: '#87A96B',
   },
   completedTime: {
     fontSize: 12,

@@ -5,7 +5,7 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Image,
+  Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
@@ -24,11 +24,24 @@ import {
 import {
   useAbstraxionAccount,
   useAbstraxionSigningClient,
+  useAbstraxionClient,
 } from '@burnt-labs/abstraxion-react-native';
 
 export default function ProfileScreen() {
-  const { data: account, isConnected, isConnecting } = useAbstraxionAccount();
-  const { client, logout } = useAbstraxionSigningClient();
+  const { 
+    data: account, 
+    isConnected, 
+    isConnecting 
+  } = useAbstraxionAccount();
+  
+  const { 
+    client: signingClient, 
+    logout 
+  } = useAbstraxionSigningClient();
+  
+  const { 
+    client: queryClient 
+  } = useAbstraxionClient();
 
   const [stats] = useState({
     level: 8,
@@ -40,6 +53,48 @@ export default function ProfileScreen() {
     rareSeeds: 3,
   });
 
+  // Handle wallet connection
+  const handleConnect = async () => {
+    try {
+      // Connection is handled automatically by the provider
+      console.log('Connecting wallet...');
+    } catch (error) {
+      console.error('Failed to connect wallet:', error);
+      Alert.alert('Connection Error', 'Failed to connect wallet');
+    }
+  };
+
+  // Handle wallet disconnection
+  const handleDisconnect = async () => {
+    try {
+      await logout();
+      Alert.alert('Success', 'Wallet disconnected successfully');
+    } catch (error) {
+      console.error('Failed to disconnect wallet:', error);
+      Alert.alert('Disconnect Error', 'Failed to disconnect wallet');
+    }
+  };
+
+  // View blockchain transactions
+  const viewOnExplorer = () => {
+    if (account?.bech32Address) {
+      const explorerUrl = `https://explorer.burnt.com/xion-testnet-1/account/${account.bech32Address}`;
+      Alert.alert(
+        'View on Explorer',
+        `Address: ${account.bech32Address}`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { 
+            text: 'Open Explorer', 
+            onPress: () => {
+              // In a real app, you'd open the URL
+              console.log('Opening explorer:', explorerUrl);
+            }
+          }
+        ]
+      );
+    }
+  };
   const [achievements] = useState([
     {
       id: '1',
@@ -138,6 +193,7 @@ export default function ProfileScreen() {
                     styles.walletButton,
                     isConnecting && styles.walletButtonDisabled,
                   ]}
+                  onPress={handleConnect}
                   disabled={isConnecting}
                 >
                   <LogIn size={20} color="#F5F1E8" />
@@ -166,12 +222,13 @@ export default function ProfileScreen() {
                 <View style={styles.walletActions}>
                   <TouchableOpacity style={styles.explorerButton}>
                     <Text style={styles.explorerButtonText}>
+                    onPress={viewOnExplorer}
                       View on Explorer
                     </Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.logoutButton}
-                    onPress={() => logout()}
+                    onPress={handleDisconnect}
                   >
                     <LogOut size={16} color="#D97757" />
                     <Text style={styles.logoutButtonText}>Disconnect</Text>

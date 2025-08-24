@@ -27,6 +27,10 @@ import {
 } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SocialPost, Comment, Challenge, User } from '@/types/xion';
+import { useDocustore } from '@/services/docustoreService';
+import {
+  useAbstraxionAccount,
+} from '@burnt-labs/abstraxion-react-native';
 
 const STORAGE_KEYS = {
   POSTS: 'tendly_social_posts',
@@ -34,6 +38,12 @@ const STORAGE_KEYS = {
   USER_PROFILE: 'tendly_user_profile',
 };
 
+// Document types for blockchain storage
+interface SocialPostDocument {
+  type: 'social_post';
+  post: SocialPost;
+  timestamp: number;
+}
 export default function SocialScreen() {
   const [posts, setPosts] = useState<SocialPost[]>([]);
   const [challenges, setChallenges] = useState<Challenge[]>([]);
@@ -48,6 +58,10 @@ export default function SocialScreen() {
     type: 'achievement' as const,
   });
   const [newComment, setNewComment] = useState('');
+
+  // Blockchain integration
+  const { data: account } = useAbstraxionAccount();
+  const { docustoreService, isConnected } = useDocustore();
 
   useEffect(() => {
     loadSocialData();
@@ -253,15 +267,12 @@ export default function SocialScreen() {
       return;
     }
 
-    if (!userProfile) {
-      Alert.alert('Error', 'User profile not found');
-      return;
-    }
+    const userId = account?.bech32Address || userProfile?.id || 'local_user';
 
     try {
       const post: SocialPost = {
         id: Date.now().toString(),
-        userId: userProfile.id,
+        userId,
         type: newPost.type,
         content: newPost.content.trim(),
         likes: 0,
@@ -274,6 +285,27 @@ export default function SocialScreen() {
 
       const updatedPosts = [post, ...posts];
       setPosts(updatedPosts);
+
+      // Store on blockchain if connected
+      if (isConnected && docustoreService) {
+        try {
+          const postDoc: SocialPostDocument = {
+            type: 'social_post',
+            post,
+            timestamp: Date.now(),
+          };
+          const docId = await docustoreService.storeDocument(postDoc);
+          
+          // Update post with blockchain document ID
+          const postWithDocId = { ...post, blockchainDocId: docId };
+          const postsWithDocId = updatedPosts.map(p => 
+            p.id === post.id ? postWithDocId : p
+          );
+          setPosts(postsWithDocId);
+        } catch (error) {
+          console.warn('Failed to store post on blockchain:', error);
+        }
+      }
 
       setNewPost({ content: '', type: 'achievement' });
       setShowCreateModal(false);
@@ -305,6 +337,20 @@ export default function SocialScreen() {
       );
 
       setPosts(updatedPosts);
+
+      // Update on blockchain if connected
+      if (isConnected && docustoreService && editingPost.blockchainDocId) {
+        try {
+          const postDoc: SocialPostDocument = {
+            type: 'social_post',
+            post: updatedPost,
+            timestamp: Date.now(),
+          };
+          await docustoreService.updateDocument(editingPost.blockchainDocId, postDoc);
+        } catch (error) {
+          console.warn('Failed to update post on blockchain:', error);
+        }
+      }
 
       setEditingPost(null);
       setNewPost({ content: '', type: 'achievement' });
@@ -505,7 +551,9 @@ export default function SocialScreen() {
           <View style={styles.header}>
             <View>
               <Text style={styles.title}>Garden Community</Text>
-              <Text style={styles.subtitle}>Share your growth journey</Text>
+              <Text style={styles.subtitle}>
+                Share your growth journey{isConnected && ' • ⛓️ Synced'}
+              </Text>
             </View>
             <TouchableOpacity
               style={styles.createButton}
