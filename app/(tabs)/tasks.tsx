@@ -8,27 +8,64 @@ import {
   TextInput,
   Modal,
   Alert,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Plus, CircleCheck as CheckCircle2, Circle, Calendar, Flag, Leaf, Clock, CreditCard as Edit, Trash2, Archive } from 'lucide-react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Task } from '@/types/xion';
-import { useDocustore } from '@/services/docustoreService';
+import {
+  Plus,
+  CircleCheck as CheckCircle2,
+  Circle,
+  Calendar,
+  Flag,
+  Leaf,
+  Clock,
+  Edit,
+  Trash2,
+  Archive,
+  X,
+  Save,
+} from 'lucide-react-native';
 import {
   useAbstraxionAccount,
+  useAbstraxionSigningClient,
+  useAbstraxionClient,
 } from '@burnt-labs/abstraxion-react-native';
+import { Task } from '@/types/xion';
 
-const TASKS_STORAGE_KEY = '@tendly_tasks';
-
-// Document type for blockchain storage
-interface TaskDocument {
-  type: 'task';
-  task: Task;
-  timestamp: number;
+if (!process.env.EXPO_PUBLIC_DOCUSTORE_CONTRACT_ADDRESS) {
+  throw new Error(
+    'EXPO_PUBLIC_DOCUSTORE_CONTRACT_ADDRESS is not set in your environment file'
+  );
 }
+
+type TaskSummary = {
+  total: number;
+  completed: number;
+  pending: number;
+  archived: number;
+};
+
 export default function TasksScreen() {
+  // Abstraxion hooks
+  const { data: account, isConnected, isConnecting, login } = useAbstraxionAccount();
+  const { client } = useAbstraxionSigningClient();
+  const { client: queryClient } = useAbstraxionClient();
+
+  // State
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [summary, setSummary] = useState<TaskSummary>({
+    total: 0,
+    completed: 0,
+    pending: 0,
+    archived: 0,
+  });
+  const [loading, setLoading] = useState(false);
+  const [loadingAction, setLoadingAction] = useState<{
+    type: 'complete' | 'delete' | 'archive';
+    id: string;
+  } | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [newTask, setNewTask] = useState({
@@ -38,231 +75,162 @@ export default function TasksScreen() {
     category: 'personal' as const,
   });
 
-  // Blockchain integration
-  const { data: account } = useAbstraxionAccount();
-  const { docustoreService, isConnected } = useDocustore();
-
-  // Load tasks from storage on component mount
-  useEffect(() => {
-    loadTasks();
-  }, []);
-
-  // Sync to blockchain when tasks change
-  useEffect(() => {
-    if (!loading && isConnected) {
-      syncTasksToBlockchain();
-    }
-  }, [tasks, isConnected]);
-
-  const syncTasksToBlockchain = async () => {
-    try {
-      if (!isConnected || !docustoreService) return;
-
-      // Store tasks collection on blockchain
-      const tasksDoc = {
-        type: 'tasks_collection',
-        tasks,
-        timestamp: Date.now(),
-      };
-
-      await docustoreService.storeDocument(tasksDoc);
-      console.log('Tasks synced to blockchain');
-    } catch (error) {
-      console.warn('Failed to sync tasks to blockchain:', error);
-    }
-  };
-  const loadTasks = async () => {
-    try {
-      setLoading(true);
-
-      // Try to load from blockchain first if connected
-      if (isConnected && docustoreService) {
-        const loadedFromBlockchain = await loadTasksFromBlockchain();
-        if (loadedFromBlockchain) {
-          setLoading(false);
-          return;
-        }
-      }
-
-      const storedTasks = await AsyncStorage.getItem(TASKS_STORAGE_KEY);
-      if (storedTasks) {
-        const parsedTasks = JSON.parse(storedTasks).map((task: any) => ({
-          ...task,
-          createdAt: new Date(task.createdAt),
-          updatedAt: new Date(task.updatedAt),
-          completedAt: task.completedAt
-            ? new Date(task.completedAt)
-            : undefined,
-          dueDate: task.dueDate ? new Date(task.dueDate) : undefined,
-        }));
-        setTasks(parsedTasks);
-      } else {
-        // Load sample data for new users
-        const sampleTasks: Task[] = [
-          {
-            id: '1',
-            userId: account?.bech32Address || 'local_user',
-            title: 'Morning workout',
-            description: 'Complete 30-minute cardio session',
-            priority: 'high',
-            category: 'health',
-            status: 'pending',
-            plantType: 'tree',
-            compostReward: 15,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-            dueDate: new Date(Date.now() + 2 * 60 * 60 * 1000),
-            tags: ['fitness', 'morning'],
-          },
-          {
-            id: '2',
-            userId: account?.bech32Address || 'local_user',
-            title: 'Review project proposal',
-            description: 'Read through and provide feedback',
-            priority: 'medium',
-            category: 'work',
-            status: 'completed',
-            plantType: 'flower',
-            compostReward: 10,
-            createdAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
-            updatedAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
-            completedAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
-            tags: ['work', 'review'],
-          },
-          {
-            id: '3',
-            userId: account?.bech32Address || 'local_user',
-            title: 'Call mom',
-            description: 'Weekly check-in call',
-            priority: 'low',
-            category: 'personal',
-            status: 'pending',
-            plantType: 'sprout',
-            compostReward: 5,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-            tags: ['family', 'personal'],
-          },
-        ];
-        setTasks(sampleTasks);
-        await saveTasks(sampleTasks);
-      }
-    } catch (error) {
-      console.error('Error loading tasks:', error);
-      Alert.alert('Error', 'Failed to load tasks');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadTasksFromBlockchain = async (): Promise<boolean> => {
-    try {
-      if (!docustoreService || !account?.bech32Address) return false;
-
-      const documents = await docustoreService.queryDocuments({
-        owner: account.bech32Address,
-        limit: 1,
+  // Fetch tasks from docustore
+  const fetchTasks = async () => {
+    if (!queryClient || !account) {
+      console.log('Cannot fetch tasks - missing queryClient or account:', {
+        hasQueryClient: !!queryClient,
+        hasAccount: !!account,
+        accountAddress: account?.bech32Address,
       });
-
-      const tasksDoc = documents
-        .filter((doc) => doc.data.type === 'tasks_collection')
-        .sort((a, b) => b.data.timestamp - a.data.timestamp)[0];
-
-      if (tasksDoc) {
-        const tasksData = tasksDoc.data.tasks;
-        
-        // Parse dates for tasks
-        const tasksWithDates = tasksData.map((task: any) => ({
-          ...task,
-          createdAt: new Date(task.createdAt),
-          updatedAt: new Date(task.updatedAt),
-          completedAt: task.completedAt ? new Date(task.completedAt) : undefined,
-          dueDate: task.dueDate ? new Date(task.dueDate) : undefined,
-        }));
-
-        setTasks(tasksWithDates);
-        return true;
-      }
-
-      return false;
-    } catch (error) {
-      console.warn('Failed to load tasks from blockchain:', error);
-      return false;
-    }
-  };
-
-  const saveTasks = async (tasksToSave: Task[]) => {
-    try {
-      await AsyncStorage.setItem(
-        TASKS_STORAGE_KEY,
-        JSON.stringify(tasksToSave)
-      );
-    } catch (error) {
-      console.error('Error saving tasks:', error);
-      Alert.alert('Error', 'Failed to save tasks');
-    }
-  };
-
-  // Create new task
-  const createTask = async () => {
-    if (!newTask.title.trim()) {
-      Alert.alert('Error', 'Task title is required');
       return;
     }
 
+    const contractAddress = process.env.EXPO_PUBLIC_DOCUSTORE_CONTRACT_ADDRESS as string;
+    console.log('Fetching tasks with contract address:', contractAddress);
+
     try {
-      const task: Task = {
-        id: Date.now().toString(),
-        userId: account?.bech32Address || 'local_user',
-        title: newTask.title.trim(),
-        description: newTask.description.trim(),
-        priority: newTask.priority,
-        category: newTask.category,
-        status: 'pending',
-        plantType:
-          newTask.priority === 'high'
-            ? 'tree'
-            : newTask.priority === 'medium'
-            ? 'flower'
-            : 'sprout',
-        compostReward:
-          newTask.priority === 'high'
-            ? 15
-            : newTask.priority === 'medium'
-            ? 10
-            : 5,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        tags: [],
-      };
+      console.log('Querying contract with params:', {
+        owner: account.bech32Address,
+        collection: 'tasks',
+      });
 
-      const updatedTasks = [task, ...tasks];
-      setTasks(updatedTasks);
-      await saveTasks(updatedTasks);
+      const response = await queryClient.queryContractSmart(contractAddress, {
+        UserDocuments: {
+          owner: account.bech32Address,
+          collection: 'tasks',
+        },
+      });
 
-      // Store on blockchain if connected
-      if (isConnected && docustoreService) {
+      console.log('Raw response from contract:', response);
+
+      if (response?.documents) {
+        console.log('Documents found:', response.documents);
+        const tasksList = response.documents.map(([id, doc]: [string, any]) => {
+          const data = typeof doc.data === 'string' ? JSON.parse(doc.data) : doc.data;
+          console.log('Processing task:', { id, data });
+          return {
+            id,
+            userId: data.userId,
+            title: data.title,
+            description: data.description,
+            priority: data.priority,
+            category: data.category,
+            status: data.status,
+            plantType: data.plantType,
+            compostReward: data.compostReward,
+            estimatedFocusTime: data.estimatedFocusTime,
+            actualFocusTime: data.actualFocusTime,
+            createdAt: new Date(data.createdAt),
+            updatedAt: new Date(data.updatedAt),
+            completedAt: data.completedAt ? new Date(data.completedAt) : undefined,
+            dueDate: data.dueDate ? new Date(data.dueDate) : undefined,
+            tags: data.tags || [],
+          } as Task;
+        });
+
+        // Sort tasks by creation date (newest first)
+        const sortedTasks = tasksList.sort((a: Task, b: Task) => {
+          return b.createdAt.getTime() - a.createdAt.getTime();
+        });
+
+        console.log('Final sorted tasks:', sortedTasks);
+        setTasks(sortedTasks);
+
+        // Update summary
+        const completed = sortedTasks.filter((t: Task) => t.status === 'completed').length;
+        const pending = sortedTasks.filter((t: Task) => t.status === 'pending').length;
+        const archived = sortedTasks.filter((t: Task) => t.status === 'archived').length;
+        
+        setSummary({
+          total: sortedTasks.length,
+          completed,
+          pending,
+          archived,
+        });
+      } else {
+        console.log('No documents found in response');
+        setTasks([]);
+        setSummary({ total: 0, completed: 0, pending: 0, archived: 0 });
+      }
+    } catch (error) {
+      console.error('Error fetching tasks:', error);
+      setTasks([]);
+      setSummary({ total: 0, completed: 0, pending: 0, archived: 0 });
+    }
+  };
+
+  // CREATE - Add new task
+  const addTask = async () => {
+    if (!client || !account || !newTask.title.trim() || !queryClient) {
+      Alert.alert('Error', 'Please enter a task title');
+      return;
+    }
+
+    const contractAddress = process.env.EXPO_PUBLIC_DOCUSTORE_CONTRACT_ADDRESS as string;
+    const taskId = Date.now().toString();
+    
+    const task: Task = {
+      id: taskId,
+      userId: account.bech32Address,
+      title: newTask.title.trim(),
+      description: newTask.description.trim(),
+      priority: newTask.priority,
+      category: newTask.category,
+      status: 'pending',
+      plantType: newTask.priority === 'high' ? 'tree' : newTask.priority === 'medium' ? 'flower' : 'sprout',
+      compostReward: newTask.priority === 'high' ? 15 : newTask.priority === 'medium' ? 10 : 5,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      tags: [],
+    };
+
+    setLoading(true);
+    try {
+      await client.execute(
+        account.bech32Address,
+        contractAddress,
+        {
+          Set: {
+            collection: 'tasks',
+            document: taskId,
+            data: JSON.stringify(task),
+          },
+        },
+        'auto'
+      );
+
+      // Wait for confirmation with retry logic
+      let retries = 0;
+      const maxRetries = 10;
+      const delay = 2000;
+
+      while (retries < maxRetries) {
         try {
-          const taskDoc: TaskDocument = {
-            type: 'task',
-            task,
-            timestamp: Date.now(),
-          };
-          const docId = await docustoreService.storeDocument(taskDoc);
-          
-          // Update task with blockchain document ID
-          const taskWithDocId = { ...task, blockchainDocId: docId };
-          const tasksWithDocId = updatedTasks.map(t => 
-            t.id === task.id ? taskWithDocId : t
-          );
-          setTasks(tasksWithDocId);
-          await saveTasks(tasksWithDocId);
+          const response = await queryClient.queryContractSmart(contractAddress, {
+            UserDocuments: {
+              owner: account.bech32Address,
+              collection: 'tasks',
+            },
+          });
+
+          if (response?.documents) {
+            const found = response.documents.some(([id]: [string, any]) => id === taskId);
+            if (found) {
+              break;
+            }
+          }
         } catch (error) {
-          console.warn('Failed to store task on blockchain:', error);
+          console.log(`Confirmation attempt ${retries + 1} failed:`, error);
+        }
+
+        retries++;
+        if (retries < maxRetries) {
+          await new Promise((resolve) => setTimeout(resolve, delay));
         }
       }
 
-      // Reset form
+      // Reset form and close modal
       setNewTask({
         title: '',
         description: '',
@@ -271,20 +239,27 @@ export default function TasksScreen() {
       });
       setShowAddModal(false);
 
-      Alert.alert('Success', 'Task created successfully!');
+      // Refresh tasks list
+      await fetchTasks();
+      Alert.alert('Success', 'Task planted in your garden! 🌱');
     } catch (error) {
-      console.error('Error creating task:', error);
-      Alert.alert('Error', 'Failed to create task');
+      console.error('Error adding task:', error);
+      Alert.alert('Error', 'Failed to add task. Please try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
-  // Update existing task
+  // UPDATE - Edit existing task
   const updateTask = async () => {
-    if (!editingTask || !newTask.title.trim()) {
-      Alert.alert('Error', 'Task title is required');
+    if (!client || !account || !editingTask || !newTask.title.trim()) {
+      Alert.alert('Error', 'Please enter a task title');
       return;
     }
 
+    const contractAddress = process.env.EXPO_PUBLIC_DOCUSTORE_CONTRACT_ADDRESS as string;
+
+    setLoading(true);
     try {
       const updatedTask: Task = {
         ...editingTask,
@@ -292,43 +267,28 @@ export default function TasksScreen() {
         description: newTask.description.trim(),
         priority: newTask.priority,
         category: newTask.category,
-        plantType:
-          newTask.priority === 'high'
-            ? 'tree'
-            : newTask.priority === 'medium'
-            ? 'flower'
-            : 'sprout',
-        compostReward:
-          newTask.priority === 'high'
-            ? 15
-            : newTask.priority === 'medium'
-            ? 10
-            : 5,
+        plantType: newTask.priority === 'high' ? 'tree' : newTask.priority === 'medium' ? 'flower' : 'sprout',
+        compostReward: newTask.priority === 'high' ? 15 : newTask.priority === 'medium' ? 10 : 5,
         updatedAt: new Date(),
       };
 
-      const updatedTasks = tasks.map((task) =>
-        task.id === editingTask.id ? updatedTask : task
+      await client.execute(
+        account.bech32Address,
+        contractAddress,
+        {
+          Update: {
+            collection: 'tasks',
+            document: editingTask.id,
+            data: JSON.stringify(updatedTask),
+          },
+        },
+        'auto'
       );
 
-      setTasks(updatedTasks);
-      await saveTasks(updatedTasks);
+      // Update local state immediately
+      setTasks(tasks.map((task) => (task.id === editingTask.id ? updatedTask : task)));
 
-      // Update on blockchain if connected
-      if (isConnected && docustoreService && editingTask.blockchainDocId) {
-        try {
-          const taskDoc: TaskDocument = {
-            type: 'task',
-            task: updatedTask,
-            timestamp: Date.now(),
-          };
-          await docustoreService.updateDocument(editingTask.blockchainDocId, taskDoc);
-        } catch (error) {
-          console.warn('Failed to update task on blockchain:', error);
-        }
-      }
-
-      // Reset form
+      // Reset form and close modal
       setNewTask({
         title: '',
         description: '',
@@ -338,101 +298,198 @@ export default function TasksScreen() {
       setEditingTask(null);
       setShowAddModal(false);
 
-      Alert.alert('Success', 'Task updated successfully!');
+      Alert.alert('Success', 'Task updated successfully! 🌿');
     } catch (error) {
       console.error('Error updating task:', error);
-      Alert.alert('Error', 'Failed to update task');
+      Alert.alert('Error', 'Failed to update task. Please try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
-  // Toggle task completion
-  const toggleTaskCompletion = async (taskId: string) => {
+  // UPDATE - Toggle task completion
+  const toggleTaskCompletion = async (task: Task) => {
+    if (!client || !account) return;
+
+    const contractAddress = process.env.EXPO_PUBLIC_DOCUSTORE_CONTRACT_ADDRESS as string;
+
+    setLoadingAction({ type: 'complete', id: task.id });
     try {
-      const updatedTasks = tasks.map((task) => {
-        if (task.id === taskId) {
-          const isCompleting = task.status !== 'completed';
-          return {
-            ...task,
-            status: isCompleting ? 'completed' : 'pending',
-            completedAt: isCompleting ? new Date() : undefined,
-            updatedAt: new Date(),
-          };
-        }
-        return task;
-      });
+      const isCompleting = task.status !== 'completed';
+      const updatedTask: Task = {
+        ...task,
+        status: isCompleting ? 'completed' : 'pending',
+        completedAt: isCompleting ? new Date() : undefined,
+        updatedAt: new Date(),
+      };
 
-      setTasks(updatedTasks);
-      await saveTasks(updatedTasks);
-
-      const task = tasks.find((t) => t.id === taskId);
-      if (task && task.status !== 'completed') {
-        Alert.alert(
-          'Great job!',
-          `You earned ${task.compostReward} compost! 🌱`
-        );
-      }
-    } catch (error) {
-      console.error('Error toggling task:', error);
-      Alert.alert('Error', 'Failed to update task');
-    }
-  };
-
-  // Archive task
-  const archiveTask = async (taskId: string) => {
-    try {
-      const updatedTasks = tasks.map((task) =>
-        task.id === taskId ? { 
-          ...task, 
-          status: 'archived',
-          updatedAt: new Date()
-        } : task
+      await client.execute(
+        account.bech32Address,
+        contractAddress,
+        {
+          Update: {
+            collection: 'tasks',
+            document: task.id,
+            data: JSON.stringify(updatedTask),
+          },
+        },
+        'auto'
       );
 
-      setTasks(updatedTasks);
-      await saveTasks(updatedTasks);
+      // Update local state
+      setTasks(tasks.map((t) => (t.id === task.id ? updatedTask : t)));
 
-      Alert.alert('Success', 'Task archived successfully!');
+      // Update summary
+      const completed = tasks.filter((t) =>
+        t.id === task.id ? updatedTask.status === 'completed' : t.status === 'completed'
+      ).length;
+      const pending = tasks.filter((t) =>
+        t.id === task.id ? updatedTask.status === 'pending' : t.status === 'pending'
+      ).length;
+      const archived = tasks.filter((t) => t.status === 'archived').length;
+
+      setSummary({
+        total: tasks.length,
+        completed,
+        pending,
+        archived,
+      });
+
+      if (isCompleting) {
+        Alert.alert('Task Completed! 🎉', `You earned ${task.compostReward} compost and planted a ${task.plantType}!`);
+      }
     } catch (error) {
-      console.error('Error archiving task:', error);
-      Alert.alert('Error', 'Failed to archive task');
+      console.error('Error toggling task completion:', error);
+      Alert.alert('Error', 'Failed to update task. Please try again.');
+    } finally {
+      setLoadingAction(null);
     }
   };
 
-  // Delete task
+  // UPDATE - Archive task
+  const archiveTask = async (taskId: string) => {
+    if (!client || !account) return;
+
+    const contractAddress = process.env.EXPO_PUBLIC_DOCUSTORE_CONTRACT_ADDRESS as string;
+    const task = tasks.find((t) => t.id === taskId);
+    if (!task) return;
+
+    setLoadingAction({ type: 'archive', id: taskId });
+    try {
+      const updatedTask: Task = {
+        ...task,
+        status: 'archived',
+        updatedAt: new Date(),
+      };
+
+      await client.execute(
+        account.bech32Address,
+        contractAddress,
+        {
+          Update: {
+            collection: 'tasks',
+            document: taskId,
+            data: JSON.stringify(updatedTask),
+          },
+        },
+        'auto'
+      );
+
+      // Update local state
+      setTasks(tasks.map((t) => (t.id === taskId ? updatedTask : t)));
+
+      // Update summary
+      const completed = tasks.filter((t) => t.id !== taskId && t.status === 'completed').length;
+      const pending = tasks.filter((t) => t.id !== taskId && t.status === 'pending').length;
+      const archived = tasks.filter((t) => t.id === taskId || t.status === 'archived').length;
+
+      setSummary({
+        total: tasks.length,
+        completed,
+        pending,
+        archived,
+      });
+
+      Alert.alert('Success', 'Task archived to garden history! 📚');
+    } catch (error) {
+      console.error('Error archiving task:', error);
+      Alert.alert('Error', 'Failed to archive task. Please try again.');
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
+  // DELETE - Remove task permanently
   const deleteTask = async (taskId: string) => {
+    if (!client || !account) return;
+
     Alert.alert(
       'Delete Task',
-      'Are you sure you want to delete this task? This action cannot be undone.',
+      'Are you sure you want to permanently delete this task? This action cannot be undone.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
-            try {
-              const taskToDelete = tasks.find(t => t.id === taskId);
-              const updatedTasks = tasks.filter((task) => task.id !== taskId);
-              setTasks(updatedTasks);
-              await saveTasks(updatedTasks);
+            const contractAddress = process.env.EXPO_PUBLIC_DOCUSTORE_CONTRACT_ADDRESS as string;
 
-              // Delete from blockchain if connected
-              if (isConnected && docustoreService && taskToDelete?.blockchainDocId) {
-                try {
-                  await docustoreService.deleteDocument(taskToDelete.blockchainDocId);
-                } catch (error) {
-                  console.warn('Failed to delete task from blockchain:', error);
-                }
-              }
+            setLoadingAction({ type: 'delete', id: taskId });
+            try {
+              await client.execute(
+                account.bech32Address,
+                contractAddress,
+                {
+                  Delete: {
+                    collection: 'tasks',
+                    document: taskId,
+                  },
+                },
+                'auto'
+              );
+
+              // Update local state
+              const updatedTasks = tasks.filter((t) => t.id !== taskId);
+              setTasks(updatedTasks);
+
+              // Update summary
+              const completed = updatedTasks.filter((t) => t.status === 'completed').length;
+              const pending = updatedTasks.filter((t) => t.status === 'pending').length;
+              const archived = updatedTasks.filter((t) => t.status === 'archived').length;
+
+              setSummary({
+                total: updatedTasks.length,
+                completed,
+                pending,
+                archived,
+              });
 
               Alert.alert('Success', 'Task deleted successfully!');
             } catch (error) {
               console.error('Error deleting task:', error);
-              Alert.alert('Error', 'Failed to delete task');
+              Alert.alert('Error', 'Failed to delete task. Please try again.');
+            } finally {
+              setLoadingAction(null);
             }
           },
         },
       ]
     );
+  };
+
+  // Load tasks when account changes
+  useEffect(() => {
+    console.log('Fetching tasks - account changed or component mounted');
+    if (account?.bech32Address) {
+      fetchTasks();
+    }
+  }, [account?.bech32Address]);
+
+  // Pull to refresh
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await fetchTasks();
+    setRefreshing(false);
   };
 
   // Open edit modal
@@ -487,189 +544,221 @@ export default function TasksScreen() {
     }
   };
 
-  // Filter out archived tasks for display
+  // Filter tasks for display
   const activeTasks = tasks.filter((task) => task.status !== 'archived');
-  const completedTasks = activeTasks.filter((task) => task.status === 'completed');
   const pendingTasks = activeTasks.filter((task) => task.status === 'pending');
-
-  if (loading) {
-    return (
-      <View style={[styles.container, styles.centered]}>
-        <Text style={styles.loadingText}>Loading tasks...</Text>
-      </View>
-    );
-  }
+  const completedTasks = activeTasks.filter((task) => task.status === 'completed');
 
   return (
     <View style={styles.container}>
       <LinearGradient colors={['#E8F4E6', '#F5F1E8']} style={styles.gradient}>
-        <ScrollView contentContainerStyle={styles.scrollContent}>
+        <ScrollView 
+          contentContainerStyle={styles.scrollContent}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
+        >
           {/* Header */}
           <View style={styles.header}>
             <View>
               <Text style={styles.title}>Task Garden</Text>
               <Text style={styles.subtitle}>
-                {pendingTasks.length} tasks to plant • {completedTasks.length}{' '}
-                growing{isConnected && ' • ⛓️ Synced'}
+                {pendingTasks.length} tasks to plant • {completedTasks.length} growing
+                {isConnected && ' • ⛓️ Synced'}
               </Text>
             </View>
             <TouchableOpacity
               style={styles.addButton}
               onPress={() => setShowAddModal(true)}
+              disabled={!isConnected}
             >
               <Plus size={24} color="#F5F1E8" />
             </TouchableOpacity>
           </View>
 
-          {/* Pending Tasks */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Ready to Plant 🌱</Text>
-            {pendingTasks.length === 0 ? (
-              <View style={styles.emptyState}>
-                <Text style={styles.emptyText}>No pending tasks</Text>
-                <Text style={styles.emptySubtext}>
-                  Create a new task to start growing your garden!
+          {/* Connection Status */}
+          {!isConnected && (
+            <View style={styles.connectionCard}>
+              <Text style={styles.connectionTitle}>Connect Wallet to Plant Tasks</Text>
+              <Text style={styles.connectionDescription}>
+                Connect your XION wallet to store tasks on the blockchain and grow your garden
+              </Text>
+              <TouchableOpacity
+                style={[styles.connectButton, isConnecting && styles.disabledButton]}
+                onPress={login}
+                disabled={isConnecting}
+              >
+                <Text style={styles.connectButtonText}>
+                  {isConnecting ? 'Connecting...' : 'Connect Wallet'}
                 </Text>
-              </View>
-            ) : (
-              pendingTasks.map((task) => (
-                <View key={task.id} style={styles.taskCard}>
-                  <TouchableOpacity
-                    style={styles.taskLeft}
-                    onPress={() => toggleTaskCompletion(task.id)}
-                  >
-                    <Circle size={24} color="#87A96B" strokeWidth={2} />
-                    <View style={styles.taskContent}>
-                      <View style={styles.taskHeader}>
-                        <Text style={styles.taskTitle}>{task.title}</Text>
-                        <View style={styles.taskMeta}>
-                          <Text style={styles.categoryEmoji}>
-                            {getCategoryIcon(task.category)}
-                          </Text>
-                          <View
-                            style={[
-                              styles.priorityIndicator,
-                              {
-                                backgroundColor: getPriorityColor(
-                                  task.priority
-                                ),
-                              },
-                            ]}
-                          />
-                        </View>
-                      </View>
-                      {task.description && (
-                        <Text style={styles.taskDescription}>
-                          {task.description}
-                        </Text>
-                      )}
-                      <View style={styles.taskFooter}>
-                        <View style={styles.rewardInfo}>
-                          <Leaf size={14} color="#87A96B" />
-                          <Text style={styles.rewardText}>
-                            +{task.compostReward} compost
-                          </Text>
-                          {task.blockchainDocId && (
-                            <Text style={styles.blockchainIndicator}>⛓️</Text>
-                          )}
-                        </View>
-                        {task.dueDate && (
-                          <View style={styles.dueDate}>
-                            <Clock size={12} color="#8B7355" />
-                            <Text style={styles.dueText}>
-                              {task.dueDate.toLocaleTimeString([], {
-                                hour: '2-digit',
-                                minute: '2-digit',
-                              })}
-                            </Text>
-                          </View>
-                        )}
-                      </View>
-                    </View>
-                  </TouchableOpacity>
-
-                  {/* Task Actions */}
-                  <View style={styles.taskActions}>
-                    <TouchableOpacity
-                      style={styles.actionButton}
-                      onPress={() => openEditModal(task)}
-                    >
-                      <Edit size={16} color="#8B7355" />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.actionButton}
-                      onPress={() => archiveTask(task.id)}
-                    >
-                      <Archive size={16} color="#8B7355" />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.actionButton}
-                      onPress={() => deleteTask(task.id)}
-                    >
-                      <Trash2 size={16} color="#D97757" />
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              ))
-            )}
-          </View>
-
-          {/* Completed Tasks */}
-          {completedTasks.length > 0 && (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Growing Strong 🌿</Text>
-              {completedTasks.map((task) => (
-                <View
-                  key={task.id}
-                  style={[styles.taskCard, styles.completedTask]}
-                >
-                  <TouchableOpacity
-                    style={styles.taskLeft}
-                    onPress={() => toggleTaskCompletion(task.id)}
-                  >
-                    <CheckCircle2 size={24} color="#87A96B" />
-                    <View style={styles.taskContent}>
-                      <Text style={[styles.taskTitle, styles.completedTitle]}>
-                        {task.title}
-                      </Text>
-                      <View style={styles.taskFooter}>
-                        <View style={styles.rewardInfo}>
-                          <Leaf size={14} color="#87A96B" />
-                          <Text style={styles.rewardText}>
-                            +{task.compostReward} earned
-                          </Text>
-                        </View>
-                        {task.completedAt && (
-                          <Text style={styles.completedTime}>
-                            Completed{' '}
-                            {task.completedAt.toLocaleTimeString([], {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}
-                          </Text>
-                        )}
-                      </View>
-                    </View>
-                  </TouchableOpacity>
-
-                  {/* Completed Task Actions */}
-                  <View style={styles.taskActions}>
-                    <TouchableOpacity
-                      style={styles.actionButton}
-                      onPress={() => archiveTask(task.id)}
-                    >
-                      <Archive size={16} color="#8B7355" />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.actionButton}
-                      onPress={() => deleteTask(task.id)}
-                    >
-                      <Trash2 size={16} color="#D97757" />
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              ))}
+              </TouchableOpacity>
             </View>
+          )}
+
+          {isConnected && (
+            <>
+              {/* Summary Section */}
+              <View style={styles.summaryCard}>
+                <View style={styles.statItem}>
+                  <Text style={styles.statNumber}>{summary.total}</Text>
+                  <Text style={styles.statLabel}>Total</Text>
+                </View>
+                <View style={styles.statItem}>
+                  <Text style={styles.statNumber}>{summary.completed}</Text>
+                  <Text style={styles.statLabel}>Completed</Text>
+                </View>
+                <View style={styles.statItem}>
+                  <Text style={styles.statNumber}>{summary.pending}</Text>
+                  <Text style={styles.statLabel}>Pending</Text>
+                </View>
+                <View style={styles.statItem}>
+                  <Text style={styles.statNumber}>{summary.archived}</Text>
+                  <Text style={styles.statLabel}>Archived</Text>
+                </View>
+              </View>
+
+              {/* Pending Tasks */}
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Ready to Plant 🌱</Text>
+                {pendingTasks.length === 0 ? (
+                  <View style={styles.emptyState}>
+                    <Text style={styles.emptyText}>No pending tasks</Text>
+                    <Text style={styles.emptySubtext}>
+                      Create a new task to start growing your garden!
+                    </Text>
+                  </View>
+                ) : (
+                  pendingTasks.map((task) => (
+                    <View key={task.id} style={styles.taskCard}>
+                      <TouchableOpacity
+                        style={styles.taskLeft}
+                        onPress={() => toggleTaskCompletion(task)}
+                        disabled={!!loadingAction}
+                      >
+                        <Circle size={24} color="#87A96B" strokeWidth={2} />
+                        <View style={styles.taskContent}>
+                          <View style={styles.taskHeader}>
+                            <Text style={styles.taskTitle}>{task.title}</Text>
+                            <View style={styles.taskMeta}>
+                              <Text style={styles.categoryEmoji}>
+                                {getCategoryIcon(task.category)}
+                              </Text>
+                              <View
+                                style={[
+                                  styles.priorityIndicator,
+                                  { backgroundColor: getPriorityColor(task.priority) },
+                                ]}
+                              />
+                            </View>
+                          </View>
+                          {task.description && (
+                            <Text style={styles.taskDescription}>{task.description}</Text>
+                          )}
+                          <View style={styles.taskFooter}>
+                            <View style={styles.rewardInfo}>
+                              <Leaf size={14} color="#87A96B" />
+                              <Text style={styles.rewardText}>+{task.compostReward} compost</Text>
+                            </View>
+                            {task.dueDate && (
+                              <View style={styles.dueDate}>
+                                <Clock size={12} color="#8B7355" />
+                                <Text style={styles.dueText}>
+                                  {task.dueDate.toLocaleTimeString([], {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                  })}
+                                </Text>
+                              </View>
+                            )}
+                          </View>
+                        </View>
+                      </TouchableOpacity>
+
+                      {/* Task Actions */}
+                      <View style={styles.taskActions}>
+                        <TouchableOpacity
+                          style={styles.actionButton}
+                          onPress={() => openEditModal(task)}
+                          disabled={!!loadingAction}
+                        >
+                          <Edit size={16} color="#8B7355" />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.actionButton}
+                          onPress={() => archiveTask(task.id)}
+                          disabled={!!loadingAction}
+                        >
+                          <Archive size={16} color="#8B7355" />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.actionButton}
+                          onPress={() => deleteTask(task.id)}
+                          disabled={!!loadingAction}
+                        >
+                          <Trash2 size={16} color="#D97757" />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ))
+                )}
+              </View>
+
+              {/* Completed Tasks */}
+              {completedTasks.length > 0 && (
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>Growing Strong 🌿</Text>
+                  {completedTasks.map((task) => (
+                    <View key={task.id} style={[styles.taskCard, styles.completedTask]}>
+                      <TouchableOpacity
+                        style={styles.taskLeft}
+                        onPress={() => toggleTaskCompletion(task)}
+                        disabled={!!loadingAction}
+                      >
+                        <CheckCircle2 size={24} color="#87A96B" />
+                        <View style={styles.taskContent}>
+                          <Text style={[styles.taskTitle, styles.completedTitle]}>
+                            {task.title}
+                          </Text>
+                          <View style={styles.taskFooter}>
+                            <View style={styles.rewardInfo}>
+                              <Leaf size={14} color="#87A96B" />
+                              <Text style={styles.rewardText}>+{task.compostReward} earned</Text>
+                            </View>
+                            {task.completedAt && (
+                              <Text style={styles.completedTime}>
+                                Completed{' '}
+                                {task.completedAt.toLocaleTimeString([], {
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                })}
+                              </Text>
+                            )}
+                          </View>
+                        </View>
+                      </TouchableOpacity>
+
+                      {/* Completed Task Actions */}
+                      <View style={styles.taskActions}>
+                        <TouchableOpacity
+                          style={styles.actionButton}
+                          onPress={() => archiveTask(task.id)}
+                          disabled={!!loadingAction}
+                        >
+                          <Archive size={16} color="#8B7355" />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.actionButton}
+                          onPress={() => deleteTask(task.id)}
+                          disabled={!!loadingAction}
+                        >
+                          <Trash2 size={16} color="#D97757" />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </>
           )}
         </ScrollView>
 
@@ -682,15 +771,16 @@ export default function TasksScreen() {
           <View style={styles.modalContainer}>
             <View style={styles.modalHeader}>
               <TouchableOpacity onPress={closeModal}>
-                <Text style={styles.cancelButton}>Cancel</Text>
+                <X size={24} color="#8B7355" />
               </TouchableOpacity>
               <Text style={styles.modalTitle}>
                 {editingTask ? 'Edit Task' : 'Plant New Task'}
               </Text>
-              <TouchableOpacity onPress={editingTask ? updateTask : createTask}>
-                <Text style={styles.saveButton}>
-                  {editingTask ? 'Update' : 'Plant'}
-                </Text>
+              <TouchableOpacity 
+                onPress={editingTask ? updateTask : addTask}
+                disabled={loading || !newTask.title.trim()}
+              >
+                <Save size={24} color={loading || !newTask.title.trim() ? "#C4B59A" : "#87A96B"} />
               </TouchableOpacity>
             </View>
 
@@ -701,9 +791,8 @@ export default function TasksScreen() {
                   style={styles.textInput}
                   placeholder="What would you like to accomplish?"
                   value={newTask.title}
-                  onChangeText={(text) =>
-                    setNewTask({ ...newTask, title: text })
-                  }
+                  onChangeText={(text) => setNewTask({ ...newTask, title: text })}
+                  editable={!loading}
                 />
               </View>
 
@@ -713,11 +802,10 @@ export default function TasksScreen() {
                   style={[styles.textInput, styles.textArea]}
                   placeholder="Add some details..."
                   value={newTask.description}
-                  onChangeText={(text) =>
-                    setNewTask({ ...newTask, description: text })
-                  }
+                  onChangeText={(text) => setNewTask({ ...newTask, description: text })}
                   multiline
                   numberOfLines={3}
+                  editable={!loading}
                 />
               </View>
 
@@ -729,11 +817,11 @@ export default function TasksScreen() {
                       key={priority}
                       style={[
                         styles.priorityOption,
-                        newTask.priority === priority &&
-                          styles.prioritySelected,
+                        newTask.priority === priority && styles.prioritySelected,
                         { borderColor: getPriorityColor(priority) },
                       ]}
                       onPress={() => setNewTask({ ...newTask, priority })}
+                      disabled={loading}
                     >
                       <Text
                         style={[
@@ -745,6 +833,9 @@ export default function TasksScreen() {
                       >
                         {priority.charAt(0).toUpperCase() + priority.slice(1)}
                       </Text>
+                      <Text style={styles.plantTypeText}>
+                        {priority === 'high' ? '🌳' : priority === 'medium' ? '🌸' : '🌱'}
+                      </Text>
                     </TouchableOpacity>
                   ))}
                 </View>
@@ -753,37 +844,50 @@ export default function TasksScreen() {
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Category</Text>
                 <View style={styles.categorySelector}>
-                  {(['personal', 'work', 'health', 'learning'] as const).map(
-                    (category) => (
-                      <TouchableOpacity
-                        key={category}
+                  {(['personal', 'work', 'health', 'learning'] as const).map((category) => (
+                    <TouchableOpacity
+                      key={category}
+                      style={[
+                        styles.categoryOption,
+                        newTask.category === category && styles.categorySelected,
+                      ]}
+                      onPress={() => setNewTask({ ...newTask, category })}
+                      disabled={loading}
+                    >
+                      <Text style={styles.categoryEmoji}>{getCategoryIcon(category)}</Text>
+                      <Text
                         style={[
-                          styles.categoryOption,
-                          newTask.category === category &&
-                            styles.categorySelected,
+                          styles.categoryText,
+                          newTask.category === category && styles.categorySelectedText,
                         ]}
-                        onPress={() => setNewTask({ ...newTask, category })}
                       >
-                        <Text style={styles.categoryEmoji}>
-                          {getCategoryIcon(category)}
-                        </Text>
-                        <Text
-                          style={[
-                            styles.categoryText,
-                            newTask.category === category &&
-                              styles.categorySelectedText,
-                          ]}
-                        >
-                          {category.charAt(0).toUpperCase() + category.slice(1)}
-                        </Text>
-                      </TouchableOpacity>
-                    )
-                  )}
+                        {category.charAt(0).toUpperCase() + category.slice(1)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
                 </View>
               </View>
             </ScrollView>
           </View>
         </Modal>
+
+        {/* Global Loading Overlay */}
+        {(loadingAction || loading) && (
+          <View style={styles.globalLoadingOverlay}>
+            <View style={styles.loadingContent}>
+              <ActivityIndicator size="large" color="#87A96B" />
+              <Text style={styles.loadingText}>
+                {loading
+                  ? editingTask ? 'Updating...' : 'Adding...'
+                  : loadingAction?.type === 'complete'
+                  ? 'Updating...'
+                  : loadingAction?.type === 'archive'
+                  ? 'Archiving...'
+                  : 'Deleting...'}
+              </Text>
+            </View>
+          </View>
+        )}
       </LinearGradient>
     </View>
   );
@@ -794,10 +898,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F5F1E8',
   },
-  centered: {
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
   gradient: {
     flex: 1,
   },
@@ -805,10 +905,6 @@ const styles = StyleSheet.create({
     paddingTop: 60,
     paddingHorizontal: 20,
     paddingBottom: 100,
-  },
-  loadingText: {
-    fontSize: 16,
-    color: '#6B7280',
   },
   header: {
     flexDirection: 'row',
@@ -839,6 +935,68 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
+  },
+  connectionCard: {
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    borderRadius: 16,
+    padding: 24,
+    marginBottom: 32,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(229, 221, 208, 0.6)',
+  },
+  connectionTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#2C5F41',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  connectionDescription: {
+    fontSize: 14,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginBottom: 20,
+    lineHeight: 20,
+  },
+  connectButton: {
+    backgroundColor: '#87A96B',
+    borderRadius: 12,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+  },
+  connectButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#F5F1E8',
+  },
+  disabledButton: {
+    backgroundColor: '#C4B59A',
+    opacity: 0.7,
+  },
+  summaryCard: {
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 32,
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    borderWidth: 1,
+    borderColor: 'rgba(229, 221, 208, 0.6)',
+  },
+  statItem: {
+    alignItems: 'center',
+  },
+  statNumber: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#2C5F41',
+    marginBottom: 4,
+  },
+  statLabel: {
+    fontSize: 12,
+    color: '#6B7280',
+    fontWeight: '500',
   },
   section: {
     marginBottom: 32,
@@ -947,11 +1105,6 @@ const styles = StyleSheet.create({
     color: '#87A96B',
     fontWeight: '500',
   },
-  blockchainIndicator: {
-    fontSize: 12,
-    color: '#87A96B',
-    marginLeft: 4,
-  },
   dueDate: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -994,19 +1147,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(229, 221, 208, 0.6)',
   },
-  cancelButton: {
-    fontSize: 16,
-    color: '#8B7355',
-  },
   modalTitle: {
     fontSize: 18,
     fontWeight: '600',
     color: '#2C5F41',
-  },
-  saveButton: {
-    fontSize: 16,
-    color: '#87A96B',
-    fontWeight: '600',
   },
   modalContent: {
     flex: 1,
@@ -1053,6 +1197,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     color: '#6B7280',
+    marginBottom: 4,
+  },
+  plantTypeText: {
+    fontSize: 16,
   },
   categorySelector: {
     flexDirection: 'row',
@@ -1081,5 +1229,29 @@ const styles = StyleSheet.create({
   },
   categorySelectedText: {
     color: '#87A96B',
+  },
+  globalLoadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  loadingContent: {
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    padding: 20,
+    borderRadius: 16,
+    alignItems: 'center',
+    minWidth: 150,
+  },
+  loadingText: {
+    marginTop: 10,
+    fontSize: 16,
+    color: '#2C5F41',
+    fontWeight: '500',
   },
 });
