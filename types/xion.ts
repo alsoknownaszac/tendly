@@ -44,6 +44,9 @@ export interface User {
   longestStreak: number;
   totalFocusHours: number;
   totalTasksCompleted: number;
+  twitterFollowersVerified?: number;
+  twitterVerifiedAt?: Date;
+  unlockedSeedTypes: string[];
   joinedAt: Date;
   lastActiveAt: Date;
   preferences: UserPreferences;
