@@ -11,6 +11,7 @@ import {
   FocusSession,
   CompostTransaction,
   UserAchievement,
+  User,
 } from '@/types/xion';
 
 const STORAGE_KEYS = {
@@ -52,6 +53,35 @@ const TWITTER_ACHIEVEMENTS = {
   social_legend: { name: 'Social Legend', description: 'Verified 100,000+ Twitter followers', icon: '👑' },
 };
 
+// Define follower count tiers and their rewards
+const FOLLOWER_TIERS = [
+  { min: 0, max: 99, level: 1, seeds: [], achievements: [] },
+  { min: 100, max: 499, level: 2, seeds: ['silver_seed'], achievements: ['social_sprout'] },
+  { min: 500, max: 999, level: 3, seeds: ['silver_seed'], achievements: ['social_sprout'] },
+  { min: 1000, max: 4999, level: 4, seeds: ['silver_seed', 'gold_seed'], achievements: ['social_sprout', 'community_bloom'] },
+  { min: 5000, max: 9999, level: 5, seeds: ['silver_seed', 'gold_seed'], achievements: ['social_sprout', 'community_bloom'] },
+  { min: 10000, max: 49999, level: 6, seeds: ['silver_seed', 'gold_seed', 'diamond_seed'], achievements: ['social_sprout', 'community_bloom', 'garden_influencer'] },
+  { min: 50000, max: 99999, level: 7, seeds: ['silver_seed', 'gold_seed', 'diamond_seed'], achievements: ['social_sprout', 'community_bloom', 'garden_influencer'] },
+  { min: 100000, max: Infinity, level: 8, seeds: ['silver_seed', 'gold_seed', 'diamond_seed', 'legendary_seed'], achievements: ['social_sprout', 'community_bloom', 'garden_influencer', 'social_legend'] },
+];
+
+// Define seed types
+const SEED_TYPES = {
+  basic: { name: 'Basic Seeds', emoji: '🌱', rarity: 'common' },
+  silver_seed: { name: 'Silver Orchid', emoji: '🌺', rarity: 'uncommon' },
+  gold_seed: { name: 'Golden Rose', emoji: '🌹', rarity: 'rare' },
+  diamond_seed: { name: 'Diamond Lotus', emoji: '💎', rarity: 'epic' },
+  legendary_seed: { name: 'Legendary Tree', emoji: '🌳', rarity: 'legendary' },
+};
+
+// Define achievements
+const TWITTER_ACHIEVEMENTS = {
+  social_sprout: { name: 'Social Sprout', description: 'Verified 100+ Twitter followers', icon: '🌱' },
+  community_bloom: { name: 'Community Bloom', description: 'Verified 1,000+ Twitter followers', icon: '🌸' },
+  garden_influencer: { name: 'Garden Influencer', description: 'Verified 10,000+ Twitter followers', icon: '🌟' },
+  social_legend: { name: 'Social Legend', description: 'Verified 100,000+ Twitter followers', icon: '👑' },
+};
+
 export function useTaskGarden(options: UseTasksOptions = {}): UseTasksReturn {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [plants, setPlants] = useState<Plant[]>([]);
@@ -59,6 +89,7 @@ export function useTaskGarden(options: UseTasksOptions = {}): UseTasksReturn {
   const [level, setLevel] = useState(1);
   const [focusSessions, setFocusSessions] = useState<FocusSession[]>([]);
   const [achievements, setAchievements] = useState<UserAchievement[]>([]);
+  const [userProfile, setUserProfile] = useState<User | null>(null);
   const [userProfile, setUserProfile] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -107,6 +138,7 @@ export function useTaskGarden(options: UseTasksOptions = {}): UseTasksReturn {
         loadLevel(),
         loadFocusSessions(),
         loadAchievements(),
+        loadUserProfile(),
         loadUserProfile(),
       ]);
 
@@ -231,6 +263,63 @@ export function useTaskGarden(options: UseTasksOptions = {}): UseTasksReturn {
       }
     } catch (err) {
       console.error('Failed to load achievements:', err);
+    }
+  };
+
+  const loadUserProfile = async () => {
+    try {
+      const stored = await AsyncStorage.getItem(STORAGE_KEYS.USER_PROFILE);
+      if (stored) {
+        const parsedProfile = JSON.parse(stored);
+        const profileWithDates = {
+          ...parsedProfile,
+          joinedAt: new Date(parsedProfile.joinedAt),
+          lastActiveAt: new Date(parsedProfile.lastActiveAt),
+          twitterVerifiedAt: parsedProfile.twitterVerifiedAt 
+            ? new Date(parsedProfile.twitterVerifiedAt) 
+            : undefined,
+        };
+        setUserProfile(profileWithDates);
+        setLevel(profileWithDates.level);
+      } else {
+        // Create default user profile
+        const defaultProfile: User = {
+          id: 'user1',
+          name: 'Garden Keeper',
+          level: 1,
+          totalCompost: 0,
+          currentStreak: 0,
+          longestStreak: 0,
+          totalFocusHours: 0,
+          totalTasksCompleted: 0,
+          unlockedSeedTypes: ['basic'],
+          joinedAt: new Date(),
+          lastActiveAt: new Date(),
+          preferences: {
+            defaultFocusTime: 25,
+            breakTime: 5,
+            soundEnabled: true,
+            notificationsEnabled: true,
+            theme: 'auto',
+            gardenWeather: 'sunny',
+          },
+        };
+        setUserProfile(defaultProfile);
+        await saveUserProfile(defaultProfile);
+      }
+    } catch (err) {
+      console.error('Failed to load user profile:', err);
+    }
+  };
+
+  const saveUserProfile = async (profile: User) => {
+    try {
+      await AsyncStorage.setItem(
+        STORAGE_KEYS.USER_PROFILE,
+        JSON.stringify(profile)
+      );
+    } catch (err) {
+      console.error('Failed to save user profile:', err);
     }
   };
 
@@ -806,6 +895,68 @@ export function useTaskGarden(options: UseTasksOptions = {}): UseTasksReturn {
     }
   };
 
+  const updateUserProfileFromTwitterVerification = async (followerCount: number) => {
+    if (!userProfile) return;
+
+    try {
+      // Find the appropriate tier based on follower count
+      const tier = FOLLOWER_TIERS.find(
+        t => followerCount >= t.min && followerCount <= t.max
+      ) || FOLLOWER_TIERS[0];
+
+      // Update user profile
+      const updatedProfile: User = {
+        ...userProfile,
+        twitterFollowersVerified: followerCount,
+        twitterVerifiedAt: new Date(),
+        level: Math.max(userProfile.level, tier.level),
+        unlockedSeedTypes: [
+          ...new Set([...userProfile.unlockedSeedTypes, ...tier.seeds])
+        ],
+        lastActiveAt: new Date(),
+      };
+
+      // Update achievements
+      const newAchievements = tier.achievements.filter(
+        achievementId => !achievements.some(a => a.achievementId === achievementId)
+      );
+
+      const updatedAchievements = [
+        ...achievements,
+        ...newAchievements.map(achievementId => ({
+          id: Date.now().toString() + achievementId,
+          userId: userProfile.id,
+          achievementId,
+          unlockedAt: new Date(),
+          progress: 100,
+          isCompleted: true,
+        }))
+      ];
+
+      // Update state
+      setUserProfile(updatedProfile);
+      setLevel(updatedProfile.level);
+      setAchievements(updatedAchievements);
+
+      // Save to storage
+      await saveUserProfile(updatedProfile);
+      await AsyncStorage.setItem(
+        STORAGE_KEYS.ACHIEVEMENTS,
+        JSON.stringify(updatedAchievements)
+      );
+
+      console.log('User profile updated from Twitter verification:', {
+        followerCount,
+        newLevel: updatedProfile.level,
+        newSeeds: tier.seeds,
+        newAchievements,
+      });
+    } catch (error) {
+      console.error('Failed to update user profile from Twitter verification:', error);
+      throw error;
+    }
+  };
+
   return {
     tasks: filteredTasks,
     loading,
@@ -823,6 +974,10 @@ export function useTaskGarden(options: UseTasksOptions = {}): UseTasksReturn {
     focusSessions,
     achievements,
     recordFocusSession,
+    userProfile,
+    updateUserProfileFromTwitterVerification,
+    seedTypes: SEED_TYPES,
+    twitterAchievements: TWITTER_ACHIEVEMENTS,
     userProfile,
     updateUserProfileFromTwitterVerification,
     seedTypes: SEED_TYPES,

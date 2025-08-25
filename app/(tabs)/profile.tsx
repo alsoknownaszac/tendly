@@ -20,11 +20,14 @@ import {
   LogIn,
   LogOut,
   Wallet,
+  Twitter,
 } from 'lucide-react-native';
 import {
   useAbstraxionAccount,
   useAbstraxionSigningClient,
 } from '@burnt-labs/abstraxion-react-native';
+import ReclaimComponent from '@/components/ReclaimComponent';
+import { useTaskGarden } from '@/hooks/useTaskGarden';
 
 export default function ProfileScreen() {
   const {
@@ -35,13 +38,24 @@ export default function ProfileScreen() {
     isConnecting,
   } = useAbstraxionAccount();
   const { client, signArb } = useAbstraxionSigningClient();
+  
+  // Use the task garden hook for user profile and verification
+  const { 
+    userProfile, 
+    level, 
+    achievements, 
+    updateUserProfileFromTwitterVerification,
+    seedTypes,
+    twitterAchievements 
+  } = useTaskGarden();
 
   const [signArbResponse, setSignArbResponse] = useState("");
   const [txHash, setTxHash] = useState("");
   const [loadingTransaction, setLoadingTransaction] = useState(false);
+  const [showTwitterVerification, setShowTwitterVerification] = useState(false);
 
   const [stats] = useState({
-    level: 8,
+    level: level,
     compost: 128,
     totalTasks: 142,
     focusHours: 45,
@@ -116,6 +130,34 @@ export default function ProfileScreen() {
     Alert.alert('Success', 'Wallet disconnected successfully');
   }
 
+  const handleTwitterVerificationComplete = async (followerCount: number) => {
+    try {
+      await updateUserProfileFromTwitterVerification(followerCount);
+      setShowTwitterVerification(false);
+      
+      // Show success message with level and rewards info
+      const tier = followerCount >= 100000 ? 8 : 
+                   followerCount >= 50000 ? 7 :
+                   followerCount >= 10000 ? 6 :
+                   followerCount >= 5000 ? 5 :
+                   followerCount >= 1000 ? 4 :
+                   followerCount >= 500 ? 3 :
+                   followerCount >= 100 ? 2 : 1;
+      
+      Alert.alert(
+        'Verification Complete! 🎉',
+        `Your Twitter followers have been verified!\n\n` +
+        `• Followers: ${followerCount.toLocaleString()}\n` +
+        `• New Level: ${tier}\n` +
+        `• Seeds Unlocked: ${tier >= 2 ? 'Yes' : 'None'}\n` +
+        `• Achievements: ${tier >= 2 ? 'Yes' : 'None'}`
+      );
+    } catch (error) {
+      console.error('Failed to handle Twitter verification:', error);
+      Alert.alert('Error', 'Failed to update profile after verification');
+    }
+  };
+
   const viewOnExplorer = () => {
     if (txHash) {
       Alert.alert(
@@ -136,7 +178,7 @@ export default function ProfileScreen() {
     }
   };
 
-  const [achievements] = useState([
+  const [staticAchievements] = useState([
     {
       id: '1',
       name: 'First Sprout',
@@ -181,6 +223,18 @@ export default function ProfileScreen() {
     },
   ]);
 
+  // Combine static achievements with Twitter achievements
+  const allAchievements = [
+    ...staticAchievements,
+    ...Object.entries(twitterAchievements).map(([key, achievement]) => ({
+      id: key,
+      name: achievement.name,
+      description: achievement.description,
+      icon: achievement.icon,
+      unlocked: achievements.some(a => a.achievementId === key),
+    }))
+  ];
+
   return (
     <View style={styles.container}>
       <LinearGradient colors={['#E8F4E6', '#F5F1E8']} style={styles.gradient}>
@@ -199,23 +253,87 @@ export default function ProfileScreen() {
               )}
               <View style={styles.profileInfo}>
                 <Text style={styles.name}>
-                  {isConnected ? 'Garden Keeper' : 'Guest Gardener'}
+                  {isConnected ? (userProfile?.name || 'Garden Keeper') : 'Guest Gardener'}
                 </Text>
                 <View style={styles.levelContainer}>
                   <Star size={16} color="#F59E0B" />
-                  <Text style={styles.level}>Level {stats.level}</Text>
+                  <Text style={styles.level}>Level {userProfile?.level || stats.level}</Text>
                 </View>
                 <Text style={styles.subtitle}>
                   {isConnected
                     ? 'Cultivating focus and growth'
                     : 'Connect wallet to save progress'}
                 </Text>
+                {userProfile?.twitterFollowersVerified && (
+                  <View style={styles.twitterVerified}>
+                    <Twitter size={14} color="#87A96B" />
+                    <Text style={styles.twitterVerifiedText}>
+                      {userProfile.twitterFollowersVerified.toLocaleString()} followers verified
+                    </Text>
+                  </View>
+                )}
               </View>
             </View>
             <TouchableOpacity style={styles.settingsButton}>
               <Settings size={24} color="#8B7355" />
             </TouchableOpacity>
           </View>
+
+          {/* Twitter Verification Section */}
+          {isConnected && (
+            <View style={styles.twitterSection}>
+              <View style={styles.twitterHeader}>
+                <Twitter size={24} color="#87A96B" />
+                <Text style={styles.twitterTitle}>Twitter Verification</Text>
+              </View>
+              
+              {!userProfile?.twitterFollowersVerified ? (
+                <View style={styles.twitterCard}>
+                  <Text style={styles.twitterDescription}>
+                    Verify your Twitter followers to unlock exclusive seeds and achievements!
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.twitterButton}
+                    onPress={() => setShowTwitterVerification(true)}
+                  >
+                    <Text style={styles.twitterButtonText}>Verify Twitter Account</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={styles.twitterVerifiedCard}>
+                  <Text style={styles.twitterVerifiedTitle}>✅ Twitter Verified</Text>
+                  <Text style={styles.twitterVerifiedCount}>
+                    {userProfile.twitterFollowersVerified.toLocaleString()} followers
+                  </Text>
+                  <Text style={styles.twitterVerifiedDate}>
+                    Verified on {userProfile.twitterVerifiedAt?.toLocaleDateString()}
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.reverifyButton}
+                    onPress={() => setShowTwitterVerification(true)}
+                  >
+                    <Text style={styles.reverifyButtonText}>Re-verify</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+              
+              {/* Show Reclaim Component when verification is active */}
+              {showTwitterVerification && (
+                <View style={styles.reclaimContainer}>
+                  <ReclaimComponent 
+                    onVerificationComplete={handleTwitterVerificationComplete}
+                    disabled={false}
+                  />
+                  <TouchableOpacity
+                    style={styles.cancelButton}
+                    onPress={() => setShowTwitterVerification(false)}
+                  >
+                    <Text style={styles.cancelButtonText}>Cancel</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          )}
 
           {/* XION Wallet Connection */}
           <View style={styles.walletSection}>
@@ -353,23 +471,20 @@ export default function ProfileScreen() {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Seed Inventory</Text>
             <View style={styles.inventoryGrid}>
-              <TouchableOpacity style={styles.seedCard}>
-                <Text style={styles.seedEmoji}>🌱</Text>
-                <Text style={styles.seedName}>Basic Seeds</Text>
-                <Text style={styles.seedCount}>∞</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.seedCard}>
-                <Text style={styles.seedEmoji}>🌺</Text>
-                <Text style={styles.seedName}>Rare Orchid</Text>
-                <Text style={styles.seedCount}>2</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.seedCard}>
-                <Text style={styles.seedEmoji}>🌳</Text>
-                <Text style={styles.seedName}>Ancient Oak</Text>
-                <Text style={styles.seedCount}>1</Text>
-              </TouchableOpacity>
+              {userProfile?.unlockedSeedTypes.map((seedType) => {
+                const seed = seedTypes[seedType as keyof typeof seedTypes];
+                if (!seed) return null;
+                
+                return (
+                  <TouchableOpacity key={seedType} style={styles.seedCard}>
+                    <Text style={styles.seedEmoji}>{seed.emoji}</Text>
+                    <Text style={styles.seedName}>{seed.name}</Text>
+                    <Text style={styles.seedCount}>
+                      {seedType === 'basic' ? '∞' : '3'}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
 
               <TouchableOpacity style={styles.shopCard}>
                 <Gift size={20} color="#87A96B" />
@@ -382,7 +497,7 @@ export default function ProfileScreen() {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Achievements</Text>
             <View style={styles.achievementsList}>
-              {achievements.map((achievement) => (
+              {allAchievements.map((achievement) => (
                 <View
                   key={achievement.id}
                   style={[
@@ -546,12 +661,119 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#6B7280',
   },
+  twitterVerified: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 4,
+  },
+  twitterVerifiedText: {
+    fontSize: 12,
+    color: '#87A96B',
+    fontWeight: '500',
+  },
   settingsButton: {
     backgroundColor: 'rgba(255, 255, 255, 0.8)',
     borderRadius: 12,
     padding: 12,
     borderWidth: 1,
     borderColor: 'rgba(229, 221, 208, 0.6)',
+  },
+  twitterSection: {
+    marginBottom: 32,
+  },
+  twitterHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 16,
+  },
+  twitterTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#2C5F41',
+  },
+  twitterCard: {
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    borderRadius: 16,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(229, 221, 208, 0.6)',
+  },
+  twitterDescription: {
+    fontSize: 14,
+    color: '#6B7280',
+    lineHeight: 20,
+    marginBottom: 16,
+  },
+  twitterButton: {
+    backgroundColor: '#87A96B',
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+  },
+  twitterButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#F5F1E8',
+  },
+  twitterVerifiedCard: {
+    backgroundColor: 'rgba(135, 169, 107, 0.1)',
+    borderRadius: 16,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(135, 169, 107, 0.3)',
+    alignItems: 'center',
+  },
+  twitterVerifiedTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#87A96B',
+    marginBottom: 8,
+  },
+  twitterVerifiedCount: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#2C5F41',
+    marginBottom: 4,
+  },
+  twitterVerifiedDate: {
+    fontSize: 12,
+    color: '#8B7355',
+    marginBottom: 16,
+  },
+  reverifyButton: {
+    backgroundColor: 'rgba(135, 169, 107, 0.2)',
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  reverifyButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#87A96B',
+  },
+  reclaimContainer: {
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    borderRadius: 16,
+    padding: 20,
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(135, 169, 107, 0.3)',
+  },
+  cancelButton: {
+    backgroundColor: 'rgba(217, 119, 87, 0.1)',
+    borderRadius: 12,
+    padding: 12,
+    alignItems: 'center',
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: '#D97757',
+  },
+  cancelButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#D97757',
   },
   walletSection: {
     marginBottom: 32,

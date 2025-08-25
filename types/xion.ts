@@ -47,6 +47,9 @@ export interface User {
   twitterFollowersVerified?: number;
   twitterVerifiedAt?: Date;
   unlockedSeedTypes: string[];
+  twitterFollowersVerified?: number;
+  twitterVerifiedAt?: Date;
+  unlockedSeedTypes: string[];
   joinedAt: Date;
   lastActiveAt: Date;
   preferences: UserPreferences;
