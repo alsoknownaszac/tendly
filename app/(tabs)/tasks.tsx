@@ -174,6 +174,7 @@ export default function TasksScreen() {
 
     setLoading(true);
     try {
+      // Execute the Set operation to store task in docustore
       await client.execute(
         account.bech32Address,
         contractAddress,
@@ -184,7 +185,10 @@ export default function TasksScreen() {
             data: JSON.stringify(task),
           },
         },
-        'auto'
+        {
+          amount: [{ denom: 'uxion', amount: '5000' }],
+          gas: '500000',
+        }
       );
 
       // Wait for confirmation with retry logic
@@ -269,7 +273,10 @@ export default function TasksScreen() {
             data: JSON.stringify(updatedTask),
           },
         },
-        'auto'
+        {
+          amount: [{ denom: 'uxion', amount: '5000' }],
+          gas: '500000',
+        }
       );
 
       // Update local state immediately
@@ -320,7 +327,10 @@ export default function TasksScreen() {
             data: JSON.stringify(updatedTask),
           },
         },
-        'auto'
+        {
+          amount: [{ denom: 'uxion', amount: '5000' }],
+          gas: '500000',
+        }
       );
 
       // Update local state
@@ -379,7 +389,10 @@ export default function TasksScreen() {
             data: JSON.stringify(updatedTask),
           },
         },
-        'auto'
+        {
+          amount: [{ denom: 'uxion', amount: '5000' }],
+          gas: '500000',
+        }
       );
 
       // Update local state
@@ -432,7 +445,10 @@ export default function TasksScreen() {
                     document: taskId,
                   },
                 },
-                'auto'
+                {
+                  amount: [{ denom: 'uxion', amount: '5000' }],
+                  gas: '500000',
+                }
               );
 
               // Update local state
